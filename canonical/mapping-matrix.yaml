@@ -447,3 +447,102 @@ mappings:
     sourceField: projectTimeline
     transform: as_is
     precedence: 5
+
+    # LLM AUDIO (speech-to-text transcript + LLM extraction)
+
+  - canonicalPath: parties.client.name
+    sourceAnalyzer: llm_audio
+    sourceField: clientName
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: parties.vendor.name
+    sourceAnalyzer: llm_audio
+    sourceField: vendorName
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: dates.effectiveDate
+    sourceAnalyzer: llm_audio
+    sourceField: startDate
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: dates.expirationDate
+    sourceAnalyzer: llm_audio
+    sourceField: endDate
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: legal.governingLaw
+    sourceAnalyzer: llm_audio
+    sourceField: governingLaw
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: parties.ndaType
+    sourceAnalyzer: llm_audio
+    sourceField: contractType       # "NDA | SOW | unknown"
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: confidentiality.term
+    sourceAnalyzer: llm_audio
+    sourceField: confidentialityTerm
+    transform: as_is
+    precedence: 3
+
+  - canonicalPath: scope.description
+    sourceAnalyzer: llm_audio
+    sourceField: scopeOfWork
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: scope.deliverables
+    sourceAnalyzer: llm_audio
+    sourceField: deliverables
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: commercials.paymentTerms
+    sourceAnalyzer: llm_audio
+    sourceField: paymentTerms
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: notes.keyDiscussionPoints
+    sourceAnalyzer: llm_audio
+    sourceField: keyDiscussionPoints
+    transform: as_is
+    precedence: 2
+
+  # Optional provenance
+  - canonicalPath: _provenance.audio.source
+    sourceAnalyzer: llm_audio
+    sourceField: _source
+    transform: as_is
+    precedence: 1
+
+  - canonicalPath: _provenance.audio.llmUsed
+    sourceAnalyzer: llm_audio
+    sourceField: _llmUsed
+    transform: as_is
+    precedence: 1
+
+  - canonicalPath: _provenance.audio.originalPath
+    sourceAnalyzer: llm_audio
+    sourceField: _originalPath
+    transform: as_is
+    precedence: 1
+
+  - canonicalPath: _provenance.audio.confidence
+    sourceAnalyzer: llm_audio
+    sourceField: _confidence
+    transform: as_is
+    precedence: 1
+
+  - canonicalPath: _provenance.audio.transcript
+    sourceAnalyzer: llm_audio
+    sourceField: _transcript
+    transform: as_is
+    precedence: 1

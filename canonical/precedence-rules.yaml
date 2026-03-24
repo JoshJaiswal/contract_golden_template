@@ -1,6 +1,8 @@
 source_priority:
   - signed_document
   - final_draft
+  - nda
+  - sow
   - cu_analyzer
   - llm_email
   - llm_audio

@@ -207,3 +207,23 @@ def build_empty_canonical() -> dict:
             "reviewedAt":   "",
         },
     }
+
+def apply_mapping(facts_by_source: dict[str, list[dict]]) -> list[dict]:
+    """
+    Apply mapping to a batch of raw records grouped by source analyzer.
+    Returns a flat list of mapped canonical candidates, one per input record.
+    Example facts_by_source:
+        {
+          "llm_audio": [ {...}, {...} ],
+          "nda":       [ {...} ]
+        }
+    """
+    candidates: list[dict] = []
+    for source, records in (facts_by_source or {}).items():
+        for rec in records:
+            # ensure _source is set (mapper uses it to select rules)
+            if "_source" not in rec:
+                rec["_source"] = source
+            mapped = map_to_canonical(rec)
+            candidates.append(mapped)
+    return candidates

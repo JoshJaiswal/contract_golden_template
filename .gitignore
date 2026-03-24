@@ -58,3 +58,9 @@ crash.log
 # Misc
 *.sqlite3
 *.key
+
+out/
+__pycache__/
+*.pyc
+.env
+.vscode/
