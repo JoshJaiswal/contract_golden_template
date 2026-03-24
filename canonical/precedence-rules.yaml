@@ -1,0 +1,14 @@
+source_priority:
+  - signed_document
+  - final_draft
+  - cu_analyzer
+  - llm_email
+  - llm_audio
+  - notes
+
+# Field-level overrides to disambiguate within the same tier
+field_overrides:
+  scope.deliverables:
+    # For SOW documents, prefer sow analyzer's cleaner deliverables
+    # over deal_intake's inScope field which extracts garbage from SOW docs
+    prefer: sow

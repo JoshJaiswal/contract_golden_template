@@ -1,0 +1,143 @@
+{
+  "contractPackageId": "CP-2026-000123",
+  "status": "ingested|classified|extracted|merged|review|approved|generated",
+  "sourceDocuments": [
+    {
+      "documentId": "DOC-001",
+      "family": "deal_intake|nda|sow|email_thread|msa|unknown",
+      "sourceType": "email|pdf|docx|txt|scan|form",
+      "sourceUri": "blob://...",
+      "ingestedAt": "2026-03-17T08:30:00Z"
+    }
+  ],
+  "normalizedParties": [
+    {
+      "legalName": "",
+      "role": "client|vendor|disclosing|receiving|partner|other",
+      "aliases": [],
+      "sourceDocumentId": "",
+      "confidence": 0.0
+    }
+  ],
+  "normalizedSigners": [
+    {
+      "name": "",
+      "partyLegalName": "",
+      "title": "",
+      "date": "",
+      "sourceDocumentId": "",
+      "confidence": 0.0
+    }
+  ],
+  "dealIntake": {
+    "engagementTitle": "",
+    "businessObjective": "",
+    "requestedServices": "",
+    "timelineRequested": "",
+    "commercialNotes": "",
+    "stakeholders": [],
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "nda": {
+    "effectiveDate": "",
+    "type": "mutual|unilateral|unknown",
+    "definitionOfConfidentialInfo": "",
+    "exclusionsFromConfidentialInfo": "",
+    "permittedUse": "",
+    "permittedDisclosures": "",
+    "requiredDisclosureProtocol": "",
+    "confidentialityTermYears": "",
+    "survivalClauses": "",
+    "returnOrDestructionObligations": "",
+    "governingLaw": "",
+    "jurisdiction": "",
+    "disputeResolutionMechanism": "",
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "sow": {
+    "sowTitle": "",
+    "effectiveDate": "",
+    "term": "",
+    "sowReferenceId": "",
+    "scopeSummary": "",
+    "inScopeItems": [],
+    "outOfScopeItems": [],
+    "deliverables": [],
+    "milestones": [],
+    "projectTimeline": [],
+    "pricingModel": "",
+    "feesSummary": "",
+    "rateCard": [],
+    "paymentTerms": "",
+    "expensesPolicy": "",
+    "assumptions": [],
+    "dependencies": [],
+    "constraints": [],
+    "governanceModel": "",
+    "locationAndTravel": "",
+    "securityRequirements": "",
+    "privacyRequirements": "",
+    "complianceStandards": [],
+    "ipOwnership": "",
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "commercials": {
+    "currency": "",
+    "totalValue": "",
+    "pricingModel": "",
+    "billingSchedule": "",
+    "rateCardSummary": "",
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "timeline": {
+    "startDate": "",
+    "endDate": "",
+    "termText": "",
+    "projectTimelineComposite": [],
+    "milestonesComposite": [],
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "legal": {
+    "ipOwnership": "",
+    "licenseGrants": "",
+    "limitationOfLiability": "",
+    "indemnities": "",
+    "injunctiveRelief": "",
+    "governingLaw": "",
+    "disputeResolution": "",
+    "msaReference": "",
+    "sourceDocumentId": "",
+    "confidence": 0.0
+  },
+  "risks": [
+    {
+      "text": "",
+      "category": "commercial|delivery|legal|security|privacy|timeline|other",
+      "sourceDocumentId": "",
+      "confidence": 0.0
+    }
+  ],
+  "missingFields": [],
+  "conflicts": [],
+  "provenance": [
+    {
+      "canonicalPath": "",
+      "value": "",
+      "sourceDocumentId": "",
+      "sourceField": "",
+      "sourceFamily": "",
+      "confidence": 0.0
+    }
+  ],
+  "review": {
+    "status": "auto|needs_review|approved",
+    "reviewReason": [],
+    "reviewedBy": "",
+    "reviewedAt": ""
+  }
+}

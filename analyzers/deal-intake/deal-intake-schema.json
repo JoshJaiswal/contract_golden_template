@@ -1,0 +1,333 @@
+{
+	"fieldSchema": {
+		"fields": {
+			"dealName": {
+				"type": "string",
+				"method": "generate",
+				"description": "Short label for the deal (e.g., Contoso x Fabrikam - NDA/SOW). If not explicitly present, generate in the format 'Customer x Vendor — Purpose'."
+			},
+			"meetingDate": {
+				"type": "date",
+				"method": "extract",
+				"description": "Anchor: Within the 'Meeting metadata' section. Pattern 'Meeting date:' followed by a date. Normalize to ISO 8601 (YYYY-MM-DD). Example source: 'Meeting date: 2026-03-11'."
+			},
+			"customerLegalName": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: Under 'Parties (legal)'. Line begins with 'Customer legal entity:'. Extract the full legal name that follows. Example: 'Customer legal entity: Northwind Traders Ltd.'."
+			},
+			"vendorLegalName": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: Under 'Parties (legal)'. Line begins with 'Vendor legal entity:'. Extract the full legal name that follows. Example: 'Vendor legal entity: Tailwind Technologies Pvt. Ltd.'."
+			},
+			"participants": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string",
+							"method": "extract",
+							"description": "Extract full name before the dash. Trim trailing punctuation or parentheses. Exclude group headings like 'Contoso (Customer)'."
+						},
+						"role": {
+							"type": "string",
+							"method": "extract",
+							"description": "Text after the dash. Normalize whitespace; remove punctuation like ';' or ')'."
+						},
+						"company": {
+							"type": "string",
+							"method": "extract",
+							"description": " Infer the participant's company using the strongest available signal:    (1) If the document contains participant section headings (e.g., 'Contoso (Customer)', 'Fabrikam (Vendor)'), use the section heading as company.    (2) If the source is an email thread, infer the company from the sender's email domain (e.g., '@globexretail.com' → 'Globex'). Strip email addresses and return only the company name.    (3) If the content is a transcript or chat log, extract company from inline speaker labels if present (e.g., 'Rohit (Globex):').    If no reliable signal is present, return 'unknown'.\""
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Anchor: 'Participants'. Lines use dash variants ('—' or '-'). For each participant line, split on the first dash to get name (left) and role (right). Infer company from the nearest heading (e.g., Contoso (Customer), Fabrikam (Vendor)). Trim punctuation. Ignore headings like 'Legal (TBD)' as person names."
+			},
+			"requestedDocuments": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"docType": {
+							"type": "string",
+							"method": "extract",
+							"description": "Document type label before the colon. Normalize to clean forms like 'NDA', 'SOW', 'MSA'. Remove trailing characters like ')'."
+						},
+						"notes": {
+							"type": "string",
+							"method": "extract",
+							"description": "Details following the colon. Remove leading/trailing whitespace and punctuation."
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Anchor: 'Requested documents'. Each line is '<DOC>: <notes>'. Extract <DOC> and trim trailing characters like ')', '.', '—'. Notes are everything after the colon."
+			},
+			"requestedDocumentTypes": {
+				"type": "string",
+				"method": "classify",
+				"description": "Normalized single-label classification representing the primary requested document(s). If multiple are clearly requested (e.g., 'NDA and SOW'), return a combined label like 'NDA+SOW' or 'MSA+SOW'.",
+				"enum": [
+					"NDA",
+					"SOW",
+					"NDA+SOW",
+					"MSA",
+					"MSA+SOW",
+					"DPA",
+					"SecurityAddendum",
+					"OrderForm",
+					"Other",
+					"unknown"
+				]
+			},
+			"ndaRequired": {
+				"type": "string",
+				"method": "classify",
+				"description": "Classify as 'yes' if the notes indicate an NDA is needed prior to further work (e.g., before SOW drafting).",
+				"enum": [
+					"yes",
+					"no",
+					"unknown"
+				]
+			},
+			"ndaType": {
+				"type": "string",
+				"method": "classify",
+				"description": "If notes state 'Mutual NDA preferred', classify as 'mutual'. If one-way disclosure is implied, classify as 'unilateral'. Otherwise, 'unknown'.",
+				"enum": [
+					"mutual",
+					"unilateral",
+					"unknown"
+				]
+			},
+			"confidentialityTermYears": {
+				"type": "number",
+				"method": "extract",
+				"description": "Anchor: 'Legal / contract preferences'. Pattern like 'Confidentiality term: 3 years'. Extract the numeric years (3)."
+			},
+			"governingLaw": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Legal / contract preferences'. Line begins with 'Governing law:'. Extract jurisdiction text. Remove leading words like 'Prefer'."
+			},
+			"sowObjective": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Scope' → 'Objective'. Extract the paragraph under Objective. Remove page-break markers or escape characters."
+			},
+			"inScope": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item": {
+							"type": "string",
+							"method": "extract",
+							"description": "Deliverable text. Clean punctuation and formatting."
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Anchor: 'In-scope deliverables'. Each bullet is a separate item. Trim backticks and punctuation."
+			},
+			"outOfScope": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"item": {
+							"type": "string",
+							"method": "extract",
+							"description": "Exclusion text. Trim punctuation."
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Anchor: 'Out of scope'. Each bullet is a separate item."
+			},
+			"pilotDurationWeeks": {
+				"type": "integer",
+				"method": "extract",
+				"description": "Anchor: 'Timeline & milestones'. Pattern: 'Pilot duration: <N> weeks'. Extract integer <N>."
+			},
+			"pricingModel": {
+				"type": "string",
+				"method": "classify",
+				"description": "Anchor: 'Commercial terms'. If notes include both fixed-fee and usage-based or subscription elements, classify as 'hybrid'.",
+				"enum": [
+					"fixedFee",
+					"usageBased",
+					"subscription",
+					"hybrid",
+					"unknown"
+				]
+			},
+			"totalValue": {
+				"type": "number",
+				"method": "extract",
+				"description": "Anchor: 'Commercial terms'. Use only if the document explicitly states a total value (e.g., 'Total contract value: INR 12,00,000'). For amounts like 'INR 18,00,000', remove separators and currency text before parsing → 1800000. Do not compute."
+			},
+			"currency": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Commercial terms'. Extract currency code from lines like 'Pilot fee: INR 18,00,000' or 'Currency: INR'. Normalize to the three-letter code."
+			},
+			"paymentTermsDays": {
+				"type": "integer",
+				"method": "extract",
+				"description": "Anchor: 'Commercial terms'. Pattern 'Payment terms: Net <N>'. Extract integer <N>."
+			},
+			"securityRequirements": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Security / compliance'. Extract the line describing security controls (e.g., encryption, audit logs, RBAC)."
+			},
+			"dataResidency": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Security / compliance'. Extract 'Data residency:' value. Clean trailing punctuation."
+			},
+			"liabilityCap": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Legal / contract preferences'. Extract position after 'Liability cap:'."
+			},
+			"ipOwnership": {
+				"type": "string",
+				"method": "extract",
+				"description": "Anchor: 'Legal / contract preferences'. Extract full IP position from 'IP:' line."
+			},
+			"openQuestionsText": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a bullet list (as text) summarizing missing information under 'Open questions / missing info'."
+			},
+			"nextSteps": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"owner": {
+							"type": "string",
+							"method": "extract",
+							"description": "Extract after 'owner:'. Remove trailing punctuation like ';'."
+						},
+						"action": {
+							"type": "string",
+							"method": "extract",
+							"description": "Action text before the parentheses. Trim whitespace and punctuation."
+						},
+						"dueDate": {
+							"type": "date",
+							"method": "extract",
+							"description": "Extract after 'due:'. Normalize to YYYY-MM-DD."
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Anchor: 'Next steps'. Lines follow the pattern 'Action (owner: Name; due: YYYY-MM-DD)'. Extract clean owner, action, dueDate. Trim punctuation."
+			},
+			"executiveSummary": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generated 2–3 sentence executive summary of the deal and requested documents."
+			},
+			"ndaReadiness": {
+				"type": "string",
+				"method": "generate",
+				"description": "One sentence on whether an NDA can be drafted now; list remaining blockers if any."
+			},
+			"sowReadiness": {
+				"type": "string",
+				"method": "generate",
+				"description": "One sentence on whether a SOW can be drafted now; list remaining blockers if any."
+			},
+			"ndaKeyPoints": {
+				"type": "string",
+				"method": "generate",
+				"description": "Short generated bullet list (as text) of NDA key points to include."
+			},
+			"sowOutline": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generated outline (as text) of SOW sections tailored to intake context."
+			},
+			"setupFee": {
+				"type": "number",
+				"method": "extract",
+				"description": "One-time setup or pilot fee. Examples: 'Setup fee: INR 9,50,000', 'Pilot fee: 18,00,000 INR'. Normalize to numeric (e.g., 950000, 1800000)."
+			},
+			"subscriptionFeeMonthly": {
+				"type": "number",
+				"method": "extract",
+				"description": "Monthly recurring subscription amount. Example: 'Subscription: INR 1,20,000 per month'. Normalize to numeric (e.g., 120000)."
+			},
+			"subscriptionFeeAnnual": {
+				"type": "number",
+				"method": "extract",
+				"description": "Annual recurring subscription amount, if present. Example: 'Annual subscription: INR 12,00,000 per year'. Normalize to numeric."
+			},
+			"usageFeeRate": {
+				"type": "string",
+				"method": "extract",
+				"description": "Usage-based pricing details. Preserve original phrasing (e.g., '₹2 per API call after 1M', 'INR 10/document beyond 5,000 docs')."
+			},
+			"rolloutDurationWeeks": {
+				"type": "integer",
+				"method": "extract",
+				"description": "Implementation/rollout duration expressed in weeks. Example: 'Rollout duration: 24 weeks'. Extract 24."
+			},
+			"rolloutDurationMonths": {
+				"type": "integer",
+				"method": "extract",
+				"description": "Implementation/rollout duration expressed in months. Example: '6-month rollout'. Extract 6."
+			},
+			"billingFrequency": {
+				"type": "string",
+				"method": "classify",
+				"description": "Classify invoicing/billing cadence based on commercial terms (e.g., 'per month' → monthly; 'per year' → annual; 'one-time' → oneTime).",
+				"enum": [
+					"monthly",
+					"quarterly",
+					"annual",
+					"oneTime",
+					"unknown"
+				]
+			},
+			"invoicingTerms": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract invoicing schedule and rules verbatim (e.g., '50% on kickoff, 50% on completion', 'Monthly invoicing', 'Setup fee upfront; subscription billed quarterly')."
+			},
+			"invoiceTriggers": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"trigger": {
+							"type": "string",
+							"method": "extract",
+							"description": "One trigger phrase (e.g., 'kickoff', 'completion', 'on signing')."
+						}
+					}
+				},
+				"method": "extract",
+				"description": "Extract explicit trigger phrases for invoicing (e.g., 'kickoff', 'completion', 'monthly billing cycle'). Each bullet/phrase becomes one item."
+			},
+			"invoiceSplit": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract concise split notation if present (e.g., '50/50', '40/40/20', '100% upfront')."
+			},
+			"extractedConflicts": {
+				"type": "string",
+				"method": "generate",
+				"description": "Summarize contradictory or conflicting statements related to pricing, NDA type, invoicing terms, data residency, pilot duration, support model, and document preferences. Use bullet points."
+			}
+		},
+		"definitions": {}
+	}
+}

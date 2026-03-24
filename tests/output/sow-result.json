@@ -1,0 +1,148 @@
+{
+  "parties": {
+    "client": {
+      "name": "Helios Global Manufacturing Corporation",
+      "signatories": []
+    },
+    "vendor": {
+      "name": "Apex Digital Transformation Services Ltd.",
+      "signatories": []
+    }
+  },
+  "dates": {
+    "effectiveDate": "",
+    "expirationDate": "\"Valid until Sept 30, 2026 unless extended\")",
+    "executionDate": ""
+  },
+  "scope": {
+    "description": "Migration of 5 systems - ERP, MES, SCM, Quality, Finance; includes analytics governance and training with 10 structured sessions (6 live workshops + 4 recorded modules).",
+    "deliverables": [
+      "10 structured sessions (6 live workshops + 4 recorded modules)"
+    ],
+    "milestones": []
+  },
+  "confidentiality": {
+    "term": "",
+    "obligations": [],
+    "exceptions": []
+  },
+  "commercials": {
+    "totalValue": "o Principal Architect: $185/hr o Senior Data Engineer: $140/hr o Data Analyst: $95/hr",
+    "paymentTerms": "",
+    "currency": ""
+  },
+  "legal": {
+    "governingLaw": "",
+    "jurisdiction": "",
+    "disputeResolution": ""
+  },
+  "risks": [],
+  "missingFields": [
+    "parties.client.signatories",
+    "parties.vendor.signatories",
+    "dates.effectiveDate",
+    "dates.executionDate",
+    "scope.milestones",
+    "confidentiality.term",
+    "confidentiality.obligations",
+    "confidentiality.exceptions",
+    "commercials.paymentTerms",
+    "commercials.currency",
+    "legal.governingLaw",
+    "legal.jurisdiction",
+    "legal.disputeResolution",
+    "review.status",
+    "review.reviewReason",
+    "review.reviewedBy",
+    "review.reviewedAt"
+  ],
+  "conflicts": [
+    {
+      "field": "scope.deliverables",
+      "chosen": [
+        "10 structured sessions (6 live workshops + 4 recorded modules)"
+      ],
+      "chosenSource": "sow",
+      "alternatives": [
+        {
+          "value": [
+            "\"Migration of source systems\" (per",
+            "analytics segment includes Power BI workspace governance?",
+            "10 structured sessions (6 live workshops + 4 recorded modules).",
+            "Grafana dashboards or observability hooks\".",
+            "Fixed Fee portion (Architecture + Migration + Analytics Enablement)",
+            "Estimated T&M hours for enhancements",
+            "contracting parties Helios Global Manufacturing Corporation (Client) Apex Digital Transformation Services Ltd. (Vendor)",
+            "\u00b7 Evelyn Park - Director, Strategic Programs . Jonathan Meier - VP, Global Technology & Data",
+            "Effective Date",
+            "Term",
+            "Issue Escalation Path",
+            "IP Ownership Clause",
+            "Dependencies",
+            "Full 4-phase Project Timeline Table"
+          ],
+          "source": "deal_intake"
+        }
+      ]
+    }
+  ],
+  "provenance": [
+    {
+      "canonicalPath": "parties.client.name",
+      "value": "Helios Global Manufacturing Corporation",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.745
+    },
+    {
+      "canonicalPath": "parties.vendor.name",
+      "value": "Apex Digital Transformation Services Ltd.",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.745
+    },
+    {
+      "canonicalPath": "dates.expirationDate",
+      "value": "\"Valid until Sept 30, 2026 unless extended\")",
+      "sourceDocumentId": "",
+      "sourceField": "sow",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.635
+    },
+    {
+      "canonicalPath": "scope.description",
+      "value": "Migration of 5 systems - ERP, MES, SCM, Quality, Finance; includes analytics governance and training with 10 structured sessions (6 live workshops + 4 recorded modules).",
+      "sourceDocumentId": "",
+      "sourceField": "sow",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.635
+    },
+    {
+      "canonicalPath": "scope.deliverables",
+      "value": "['10 structured sessions (6 live workshops + 4 recorded modules)']",
+      "sourceDocumentId": "",
+      "sourceField": "sow",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.635
+    },
+    {
+      "canonicalPath": "commercials.totalValue",
+      "value": "o Principal Architect: $185/hr o Senior Data Engineer: $140/hr o Data Analyst: $95/hr",
+      "sourceDocumentId": "",
+      "sourceField": "sow",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.635
+    }
+  ],
+  "review": {
+    "status": "needs_review",
+    "reviewReason": [
+      "1 field conflict(s) found",
+      "Critical fields missing: ['dates.effectiveDate']"
+    ],
+    "reviewedBy": "",
+    "reviewedAt": ""
+  }
+}

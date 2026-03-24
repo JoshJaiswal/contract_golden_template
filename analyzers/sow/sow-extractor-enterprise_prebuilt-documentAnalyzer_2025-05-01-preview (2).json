@@ -1,0 +1,262 @@
+{
+	"fieldSchema": {
+		"fields": {
+			"sowTitle": {
+				"type": "string",
+				"method": "generate",
+				"description": "For email threads, return the intended SOW title from the most recent Subject line containing 'SOW'; strip only 'Re:'/'Fwd:' prefixes and extra spaces. For documents/plain text, return the main header line (e.g., 'Statement of Work (SOW)' or 'Project: …'). Do not invent a title if none is present."
+			},
+			"parties": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a structured summary of all contracting entities and roles using EXACT delimiters: between attributes use ' | ' (spaces on both sides), and between parties use ' || '. Format: PARTY::<LegalName> | ROLE::<client|vendor|partner|subcontractor> || PARTY::<LegalName> | ROLE::<role>. Do not omit or alter delimiters. Do not include signer information."
+			},
+			"partiesSigners": {
+				"type": "string",
+				"method": "generate",
+				"description": "If the SOW includes printed signer details, generate them using: SIGNER::<Name> \n PARTY::<PartyName> \n TITLE::<Title?> \n DATE::<YYYY-MM-DD?>. If the SOW only includes blank signature lines, return an empty string."
+			},
+			"effectiveDate": {
+				"type": "date",
+				"method": "extract",
+				"description": "Extract the effective date as printed. Accept with or without the label 'Effective Date:'. Allow 'DD Month YYYY', 'YYYY-MM-DD', or 'MM/DD/YYYY'. Do not normalize, reformat, or synthesize content."
+			},
+			"term": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any text describing how long the SOW remains active, including fixed end dates, duration statements, or narrative phrasing (e.g., 'This SOW remains in force until 30 June 2026' or 'The term of this SOW is six months from the Effective Date'). Do not normalize, reformat, or synthesize content."
+			},
+			"sowReferenceId": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any identifier labeled as SOW Number, SOW ID, Project Code, or Reference Number. Do not normalize, reformat, or synthesize content."
+			},
+			"scopeSummary": {
+				"type": "string",
+				"method": "generate",
+				"description": "Synthesize a one- to two-sentence summary of the project scope from all available content (emails or documents). Prefer explicit statements (systems included, analytics governance, training). Do not add details not present in the content."
+			},
+			"inScopeItems": {
+				"type": "string",
+				"method": "extract",
+				"description": "If the SOW lists in-scope bullets, extract them verbatim and join with ';; '. Do not normalize, reformat, or synthesize content."
+			},
+			"outOfScopeItems": {
+				"type": "string",
+				"method": "extract",
+				"description": "If the SOW lists out-of-scope bullets, extract them verbatim and join with ';; '. Do not normalize, reformat, or synthesize content."
+			},
+			"deliverables": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a list of deliverables exactly as written in the SOW. Join deliverables using '\n\n'. Do not require DELIV:: tagging; raw extraction will be normalized."
+			},
+			"deliverablesComposite": {
+				"type": "string",
+				"method": "generate",
+				"description": "Normalize deliverables into structured format: DELIV::<Name> \n DESC::<ShortDesc?> \n DUE::<Date?> \n ACCEPT::<Criteria?>, one per line joined by '\n\n'."
+			},
+			"milestones": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract milestone descriptions exactly as printed, including dates, phases, and percentages. Return items exactly as they appear; do not reformat or concatenate. Return text verbatim as it appears; do not normalize whitespace or strip characters. Do not normalize, reformat, or synthesize content."
+			},
+			"acceptanceCriteria": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any text describing how deliverables are reviewed, accepted, or deemed accepted, even if not in a dedicated 'Acceptance' section. Do not normalize, reformat, or synthesize content."
+			},
+			"pricingModel": {
+				"type": "string",
+				"method": "extract",
+				"description": "Identify the pricing model phrase exactly as stated (e.g., 'Fixed Fee', 'Time & Materials', 'Not-to-Exceed', 'Unit Rate Card'). Do not normalize, reformat, or synthesize content."
+			},
+			"feesSummary": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract the fee summary paragraph or table text (e.g., totals, components). If tabular, return lines exactly as they appear; do not join or reformat. Do not normalize, reformat, or synthesize content."
+			},
+			"rateCard": {
+				"type": "string",
+				"method": "extract",
+				"description": "If a rate card is included, extract rows joined by '\n\n'. Suggested tags for downstream parsing: ROLE::<Role> | RATE::<Currency+Number+Unit> | UOM::<hour/day>. Do not normalize, reformat, or synthesize content."
+			},
+			"paymentTerms": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract payment terms (e.g., 'Net 30 from invoice date', milestone billing triggers, late payment interest). Do not normalize, reformat, or synthesize content."
+			},
+			"taxesDuties": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract tax allocation language (e.g., VAT/GST responsibilities, withholding, duties). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"expensesPolicy": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract travel & expenses policy (e.g., reimbursable rules, per-diem, pre-approval requirements). Do not normalize, reformat, or synthesize content."
+			},
+			"projectTimeline": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any schedule/timeline information including phases, date ranges, durations, or stage sequencing from the source exactly as printed, including tables, bullets, or narrative sentences. If a table or multiple phase lines are present, capture each line/row verbatim in reading order; do not add tags, do not join with delimiters, and do not rewrite. Do not normalize, reformat, or synthesize content."
+			},
+			"dependencies": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract dependencies wherever they occur, including assumptions or constraints that describe required conditions for execution. Return items exactly as they appear; do not reformat or concatenate. Do not normalize, reformat, or synthesize content."
+			},
+			"assumptions": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract the listed project assumptions; return bullets exactly as they appear; do not reformat or concatenate. Do not normalize, reformat, or synthesize content."
+			},
+			"constraints": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract key constraints (e.g., technical, timeline, regulatory). Join bullets with ';; '. Do not normalize, reformat, or synthesize content."
+			},
+			"keyPersonnel": {
+				"type": "string",
+				"method": "extract",
+				"description": "If named personnel are listed, extract rows joined by '\n\n' using tags for downstream parsing: PERSON::<Name> | ORG::<Client/Vendor> | ROLE::<Role> | ALLOC::<%/hours?> | REPLACEMENT::<consent/notice?>. Do not normalize, reformat, or synthesize content."
+			},
+			"governanceModel": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract project governance details (steering committee, cadences, decision rights, RAID). Do not normalize, reformat, or synthesize content."
+			},
+			"locationAndTravel": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract delivery locations (onsite/remote/hybrid) and any travel/onsite requirements. Return text verbatim as it appears; do not normalize or strip bullets. Do not normalize, reformat, or synthesize content."
+			},
+			"changeControl": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract change request process (initiation, impact assessment, approvals, effects on scope/schedule/cost). Do not normalize, reformat, or synthesize content."
+			},
+			"issueEscalation": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract issue/risk escalation path (who escalates to whom, response times). Do not normalize, reformat, or synthesize content."
+			},
+			"serviceLevels": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract SLA/OLA metrics or targets. If tabular, return lines exactly as they appear; do not join or reformat. Do not normalize, reformat, or synthesize content."
+			},
+			"warranties": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any performance/defect warranty language and remedy windows. Do not normalize, reformat, or synthesize content."
+			},
+			"securityRequirements": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any mention of security controls or compliance (e.g., MFA, encryption, log retention, SOC2, ISO, GDPR), even if located within Special Terms. Do not normalize, reformat, or synthesize content."
+			},
+			"privacyRequirements": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate any privacy-related obligations stated in the SOW, including GDPR references, client privacy policy references, or personal data handling restrictions."
+			},
+			"complianceStandards": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract regulatory/industry standards referenced (e.g., PCI, HIPAA, FDA, SOX, ISO 27001, IEC 62443, GDPR), or 'none'. Do not normalize, reformat, or synthesize content."
+			},
+			"ipOwnership": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any clause concerning ownership of deliverables, work product, or pre-existing materials (work-made-for-hire or equivalent), regardless of section. Do not normalize, reformat, or synthesize content."
+			},
+			"licenseGrants": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract license grant language (scope, term, revocability, sublicensing, territory). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"thirdPartySoftware": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract third-party/open-source usage obligations (notices, versions, license types). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"terminationForConvenience": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract ToC clause (notice period, payable fees/expenses upon termination). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"terminationForCause": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract for-cause termination triggers and cure periods. Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"limitationOfLiability": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract liability caps/exclusions (indirect, special) and any supercaps. Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"indemnities": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract indemnity clauses (e.g., IP infringement, third-party claims). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"injunctiveRelief": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present, extract any clause allowing injunctive, interim, or equitable relief (including irreparable-harm language). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"msaReference": {
+				"type": "string",
+				"method": "extract",
+				"description": "If the SOW references an MSA, extract the reference and/or date. Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"governingLaw": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present in the SOW, extract the governing law (else defer to MSA). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"disputeResolution": {
+				"type": "string",
+				"method": "extract",
+				"description": "If present in the SOW, extract arbitration/venue/mediation references (else defer to MSA). Treat as optional if absent. Do not normalize, reformat, or synthesize content."
+			},
+			"risks": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract listed project risks; return bullets exactly as they appear; do not reformat or concatenate. Do not normalize, reformat, or synthesize content."
+			},
+			"acceptanceTimeline": {
+				"type": "string",
+				"method": "extract",
+				"description": "Extract any explicit time window for acceptance/rejection and deemed-acceptance rules. Do not normalize, reformat, or synthesize content."
+			},
+			"missingRequiredClauses": {
+				"type": "string",
+				"method": "generate",
+				"description": "List missing core SOW clauses only: sowTitle, parties, effectiveDate, scopeSummary, inScopeItems, outOfScopeItems, deliverables, milestones, acceptanceCriteria, pricingModel, feesSummary, paymentTerms, projectTimeline, assumptions, dependencies, risks."
+			},
+			"extractedConflicts": {
+				"type": "string",
+				"method": "generate",
+				"description": "Summarize contradictions (e.g., fixed fee plus rate card; two acceptance periods; conflicting IP ownership)."
+			},
+			"sowSummary": {
+				"type": "string",
+				"method": "generate",
+				"description": "1–3 sentence business-friendly summary of scope, pricing model, timeline, and acceptance approach."
+			},
+			"sowRiskAssessment": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a risk note that flags missing clauses, ambiguous acceptance, weak change control, unclear IP, or onerous liability terms."
+			},
+			"projectTimelineComposite": {
+				"type": "string",
+				"method": "generate",
+				"description": "Normalize any schedule/timeline found (table, bullets, narrative) into rows formatted as PHASE::<Phase?> | DESC::<Description?> | DURATION::<Duration?> | DATES::<Dates?> joined by '||'. Use only statements present in the content. Do not invent values."
+			}
+		},
+		"definitions": {}
+	}
+}

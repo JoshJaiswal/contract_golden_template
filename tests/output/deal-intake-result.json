@@ -1,0 +1,199 @@
+{
+  "parties": {
+    "client": {
+      "name": "Contoso India Pvt. Ltd.",
+      "signatories": []
+    },
+    "vendor": {
+      "name": "Fabrikam Solutions Pvt. Ltd.",
+      "signatories": []
+    }
+  },
+  "dates": {
+    "effectiveDate": "2026-03-13",
+    "expirationDate": "",
+    "executionDate": ""
+  },
+  "scope": {
+    "description": "Deploy a pilot for extracting key fields from procurement documents and generating structured outputs for downstream systems.",
+    "deliverables": [
+      ". Configure Content Understanding custom task \\` deal-intake-doc\\` for extracting deal facts from transcripts/notes.",
+      "Integrate extracted JSON output into Contoso's internal workflow tool (REST webhook).",
+      "Provide dashboards for intake volume, missing-field rate, and confidence distribution.",
+      "Knowledge transfer session + admin guide."
+    ],
+    "milestones": [
+      "Target NDA execution: 2026-03-18 Pilot kickoff: 2026-03-24 Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6"
+    ]
+  },
+  "confidentiality": {
+    "term": 3,
+    "obligations": [],
+    "exceptions": "Standard (public info, independently developed, required disclosure)"
+  },
+  "commercials": {
+    "totalValue": 1800000,
+    "paymentTerms": "50% on kickoff, 50% on completion",
+    "currency": "INR"
+  },
+  "legal": {
+    "governingLaw": "Tamil Nadu / India",
+    "jurisdiction": "India preferred",
+    "disputeResolution": ""
+  },
+  "risks": [],
+  "missingFields": [
+    "parties.client.signatories",
+    "parties.vendor.signatories",
+    "dates.expirationDate",
+    "dates.executionDate",
+    "confidentiality.obligations",
+    "legal.disputeResolution",
+    "review.status",
+    "review.reviewReason",
+    "review.reviewedBy",
+    "review.reviewedAt"
+  ],
+  "conflicts": [
+    {
+      "field": "commercials.paymentTerms",
+      "chosen": "50% on kickoff, 50% on completion",
+      "chosenSource": "deal_intake",
+      "alternatives": [
+        {
+          "value": "Net 30 Invoicing: 50% on kickoff, 50% on completion",
+          "source": "sow"
+        }
+      ]
+    },
+    {
+      "field": "legal.governingLaw",
+      "chosen": "Tamil Nadu / India",
+      "chosenSource": "deal_intake",
+      "alternatives": [
+        {
+          "value": "Prefer Tamil Nadu / India",
+          "source": "nda"
+        },
+        {
+          "value": "Prefer Tamil Nadu / India",
+          "source": "sow"
+        }
+      ]
+    }
+  ],
+  "provenance": [
+    {
+      "canonicalPath": "parties.client.name",
+      "value": "Contoso India Pvt. Ltd.",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "parties.vendor.name",
+      "value": "Fabrikam Solutions Pvt. Ltd.",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "dates.effectiveDate",
+      "value": "2026-03-13",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "scope.description",
+      "value": "Deploy a pilot for extracting key fields from procurement documents and generating structured outputs for downstream systems.",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "scope.deliverables",
+      "value": "['. Configure Content Understanding custom task \\\\` deal-intake-doc\\\\` for extracting deal facts from transcripts/notes.', \"Integrate extracted JSON output into Contoso's internal workflow tool (REST webhook).\", 'Provide dashboards for intake volume, missing-field rate, and confidence distribution.', 'Knowledge transfer session + admin guide.']",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "scope.milestones",
+      "value": "['Target NDA execution: 2026-03-18 Pilot kickoff: 2026-03-24 Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6']",
+      "sourceDocumentId": "",
+      "sourceField": "sow",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.679
+    },
+    {
+      "canonicalPath": "confidentiality.term",
+      "value": "3",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "confidentiality.exceptions",
+      "value": "Standard (public info, independently developed, required disclosure)",
+      "sourceDocumentId": "",
+      "sourceField": "nda",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.841
+    },
+    {
+      "canonicalPath": "commercials.totalValue",
+      "value": "1800000",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "commercials.paymentTerms",
+      "value": "50% on kickoff, 50% on completion",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "commercials.currency",
+      "value": "INR",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "legal.governingLaw",
+      "value": "Tamil Nadu / India",
+      "sourceDocumentId": "",
+      "sourceField": "deal_intake",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.815
+    },
+    {
+      "canonicalPath": "legal.jurisdiction",
+      "value": "India preferred",
+      "sourceDocumentId": "",
+      "sourceField": "nda",
+      "sourceFamily": "cu_analyzer",
+      "confidence": 0.841
+    }
+  ],
+  "review": {
+    "status": "needs_review",
+    "reviewReason": [
+      "2 field conflict(s) found"
+    ],
+    "reviewedBy": "",
+    "reviewedAt": ""
+  }
+}
