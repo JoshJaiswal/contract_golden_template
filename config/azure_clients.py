@@ -39,26 +39,14 @@ def _require_env(key: str) -> str:
 def get_cu_client():
     """
     Azure Content Understanding / Document Intelligence client.
-
-    TODO: Replace with the correct SDK class for your CU setup.
-    If using Azure AI Document Intelligence SDK:
-        pip install azure-ai-documentintelligence
-        from azure.ai.documentintelligence import DocumentIntelligenceClient
-        from azure.core.credentials import AzureKeyCredential
-
-    If using Content Understanding directly (newer):
-        from azure.ai.documentintelligence import DocumentIntelligenceClient
+    pip install azure-ai-documentintelligence
     """
     endpoint = _require_env("AZURE_CU_ENDPOINT")
     key = _require_env("AZURE_CU_KEY")
 
-    # TODO: Uncomment once you've confirmed your CU SDK package:
-    # from azure.ai.documentintelligence import DocumentIntelligenceClient
-    # from azure.core.credentials import AzureKeyCredential
-    # return DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-
-    log.warning("[AzureClients] CU client is a stub — install SDK and uncomment above")
-    return _StubClient("CU", endpoint)
+    from azure.ai.documentintelligence import DocumentIntelligenceClient
+    from azure.core.credentials import AzureKeyCredential
+    return DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
 
 @lru_cache(maxsize=1)
@@ -76,21 +64,18 @@ def get_blob_client():
 @lru_cache(maxsize=1)
 def get_openai_client():
     """
-    Azure OpenAI client for GPT-4o extraction.
+    Azure OpenAI client for GPT-4o-mini extraction.
     pip install openai
-
-    NOTE: You need to request Azure OpenAI access if not already approved.
-    Takes ~1 business day: https://aka.ms/oai/access
     """
     endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
     key = _require_env("AZURE_OPENAI_KEY")
 
-    # TODO: Uncomment once Azure OpenAI is provisioned:
-    # from openai import AzureOpenAI
-    # return AzureOpenAI(azure_endpoint=endpoint, api_key=key, api_version="2024-02-01")
-
-    log.warning("[AzureClients] OpenAI client is a stub — provision Azure OpenAI and uncomment above")
-    return _StubClient("OpenAI", endpoint)
+    from openai import AzureOpenAI
+    return AzureOpenAI(
+        azure_endpoint=endpoint,
+        api_key=key,
+        api_version="2024-02-01",
+    )
 
 
 @lru_cache(maxsize=1)
@@ -99,30 +84,31 @@ def get_speech_config():
     Azure Speech Services config for audio transcription.
     pip install azure-cognitiveservices-speech
 
-    NOTE: Speech Services free tier = 5 hours/month transcription.
-    Enable in Azure Portal → Create Resource → Speech.
+    Free tier: 5 hours/month transcription.
+    Enable: Azure Portal → Create Resource → Speech.
     """
     key = _require_env("AZURE_SPEECH_KEY")
     region = _require_env("AZURE_SPEECH_REGION")
 
-    # TODO: Uncomment once Speech Services is provisioned:
-    # import azure.cognitiveservices.speech as speechsdk
-    # config = speechsdk.SpeechConfig(subscription=key, region=region)
-    # config.speech_recognition_language = "en-US"
-    # return config
-
-    log.warning("[AzureClients] Speech config is a stub — provision Speech Services and uncomment above")
-    return _StubClient("Speech", region)
+    import azure.cognitiveservices.speech as speechsdk
+    config = speechsdk.SpeechConfig(subscription=key, region=region)
+    config.speech_recognition_language = "en-US"
+    # Output detailed results so we can pull full text from all segments
+    config.output_format = speechsdk.OutputFormat.Detailed
+    return config
 
 
-class _StubClient:
-    """Placeholder client for services not yet provisioned."""
-    def __init__(self, service_name: str, endpoint: str):
-        self._service = service_name
-        self._endpoint = endpoint
+def get_speech_endpoint() -> tuple[str, str]:
+    """
+    Return (key, region) for use with the Speech batch REST API.
+    Separate from get_speech_config() because batch API uses raw HTTP,
+    not the SDK config object.
+    """
+    key = _require_env("AZURE_SPEECH_KEY")
+    region = _require_env("AZURE_SPEECH_REGION")
+    return key, region
 
-    def __getattr__(self, name):
-        raise NotImplementedError(
-            f"{self._service} client is not yet configured. "
-            f"See azure_clients.py for setup instructions."
-        )
+
+def get_openai_deployment() -> str:
+    """Return the configured GPT-4o deployment name."""
+    return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
