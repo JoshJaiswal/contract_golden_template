@@ -21,6 +21,9 @@ import os
 import logging
 from functools import lru_cache
 
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+
 log = logging.getLogger(__name__)
 
 

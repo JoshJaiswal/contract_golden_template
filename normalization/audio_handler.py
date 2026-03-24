@@ -4,41 +4,33 @@ audio_handler.py
 Handles audio inputs (.mp3, .wav, .m4a) by:
   1. Uploading audio to Azure Blob Storage (for batch mode)
   2. Transcribing via Azure Speech Services
-     - Real-time SDK  → files under ~5 MB  (short calls)
-     - Batch REST API → files 5 MB+        (long meetings/recordings)
+     - Real-time SDK  → files under ~5 MB (short calls) or when batch is disabled
+     - Batch REST API → long recordings / compressed formats when available
   3. Sending transcript to GPT-4o-mini for contract field extraction
   4. Returning a canonical-shaped extraction result
 
-WHY SPEECH SERVICES + GPT-4o-mini?
-  Azure Speech Services  → accurate transcription, multi-speaker diarization
-  GPT-4o-mini            → understands messy spoken language, extracts
-                           structured contract fields using same schema as CU
+Notes you should know:
+- Batch transcription requires a Standard (S0) Speech resource tier.
+  On Free (F0), batch calls will be rejected by the service.
+- The real-time SDK can read compressed files (mp3/m4a/mp4) only if the
+  machine has GStreamer visible on PATH. WAV/PCM works natively.
 
-SETUP CHECKLIST:
-  1. pip install azure-cognitiveservices-speech azure-storage-blob openai
-  2. Add to .env:
-       AZURE_SPEECH_KEY=<your key>
-       AZURE_SPEECH_REGION=uksouth          # or your region
-       AZURE_OPENAI_ENDPOINT=<your endpoint>
-       AZURE_OPENAI_KEY=<your key>
-       AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
-       AZURE_BLOB_CONNECTION_STR=<your connection string>
-  3. In Azure Portal: create a Speech resource and a Storage account
-     (the blob container "audio-staging" is created automatically below)
-
-Free tier limits:
-  Speech Services: 5 hours/month free transcription
-  GPT-4o-mini:     ~$0.0002 per 1K tokens (very cheap)
+Env switches:
+- SPEECH_ALLOW_BATCH=true|false   # set to false on F0 during testing
 """
 
 import json
 import logging
+import os
 import time
 import threading
 from pathlib import Path
 from typing import Literal
 
 import requests
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())  # loads .env from your project root
+_ENABLE_DIARIZATION = os.getenv("SPEECH_DIARIZATION", "false").strip().lower() in {"1","true","yes","y"}
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +41,8 @@ AUDIO_BLOB_CONTAINER = "audio-staging"
 _BATCH_POLL_INTERVAL_SECONDS = 10
 _BATCH_MAX_WAIT_SECONDS = 600  # 10 minutes max
 
+# Allow batch? (Disable on Free tier for testing)
+_ALLOW_BATCH = os.getenv("SPEECH_ALLOW_BATCH", "true").strip().lower() in {"1", "true", "yes", "y"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry point
@@ -89,7 +83,7 @@ def handle_audio(
     if not transcript.strip():
         raise ValueError(
             "Transcription returned empty text. "
-            "Check the audio file is not silent and Speech Services is provisioned."
+            "Check the audio file has speech and Speech Services is provisioned."
         )
 
     # ── Step 3: Extract contract fields via GPT-4o-mini ───────────────────────
@@ -108,23 +102,42 @@ def handle_audio(
 
 def transcribe_audio(blob_url_or_path: str, local_path: str) -> str:
     """
-    Route to real-time or batch transcription based on file size.
+    Route to real-time or batch transcription based on file size and extension.
 
     - Under 5 MB  → real-time SDK (instant, synchronous)
-    - 5 MB+       → batch REST API (async, handles long recordings)
-
-    Args:
-        blob_url_or_path: Azure Blob URL (for batch) or local path fallback.
-        local_path:       Always the local file path (for size check + real-time).
+    - 5 MB+       → batch REST API (async) when allowed
+    - Compressed formats (.m4a/.mp4/.aac) → prefer batch when allowed
     """
     file_size_mb = Path(local_path).stat().st_size / (1024 * 1024)
-    log.info(f"[Audio] File size: {file_size_mb:.1f} MB — "
-             f"using {'real-time' if file_size_mb < 5 else 'batch'} transcription")
+    log.info(
+        f"[Audio] File size: {file_size_mb:.1f} MB — "
+        f"using {'real-time' if file_size_mb < 5 else 'batch'} transcription"
+    )
 
-    if file_size_mb < 5:
+    ext = Path(local_path).suffix.lower()
+    is_https = isinstance(blob_url_or_path, str) and blob_url_or_path.startswith("https://")
+
+    # Prefer batch for compressed formats to avoid local decode dependencies
+    if ext in {".m4a", ".mp4", ".aac"}:
+        if not _ALLOW_BATCH:
+            raise RuntimeError(
+                "Compressed input detected but batch is disabled (SPEECH_ALLOW_BATCH=false). "
+                "On Free (F0) tier, record or convert to WAV/PCM for real-time testing, "
+                "or upgrade Speech to Standard (S0) to enable batch for compressed files."
+            )
+        if not is_https:
+            raise ValueError(
+                "Batch transcription requires an Azure Blob URL for compressed inputs. "
+                "Set upload_to_blob=True or pass a blob URL directly."
+            )
+        log.info(f"[Audio] {ext} detected — forcing batch transcription")
+        return _transcribe_batch(blob_url_or_path)
+
+    # Size-based routing for non-compressed formats
+    if file_size_mb < 5 or not _ALLOW_BATCH:
         return _transcribe_realtime(local_path)
     else:
-        if not blob_url_or_path.startswith("https://"):
+        if not is_https:
             raise ValueError(
                 "Batch transcription requires an Azure Blob URL. "
                 "Set upload_to_blob=True or pass a blob URL directly."
@@ -140,20 +153,13 @@ def _transcribe_realtime(file_path: str) -> str:
     """
     Transcribe using Azure Speech SDK with continuous recognition.
 
-    Handles files of any length by using continuous recognition instead
-    of recognize_once() — collects all segments until EOF.
-
-    Supports: WAV natively; MP3/M4A converted to WAV in memory via pydub
-    if available, otherwise Speech SDK handles common formats directly.
+    WAV/PCM works out of the box. For MP3/M4A on Windows, the SDK requires
+    GStreamer to decode compressed audio at runtime.
     """
     import azure.cognitiveservices.speech as speechsdk
     from config.azure_clients import get_speech_config
 
     speech_config = get_speech_config()
-
-    # Resolve audio format — Speech SDK handles WAV/MP3/M4A directly
-    # when using PushAudioInputStream with the right format hint
-    file_ext = Path(file_path).suffix.lower()
     audio_config = speechsdk.audio.AudioConfig(filename=file_path)
 
     recognizer = speechsdk.SpeechRecognizer(
@@ -194,7 +200,8 @@ def _transcribe_realtime(file_path: str) -> str:
     if not transcript:
         raise RuntimeError(
             "Speech recognition returned no text. "
-            "Verify the audio has speech and AZURE_SPEECH_KEY/REGION are correct."
+            "If you used MP3/M4A, install GStreamer or record WAV/PCM; "
+            "also verify AZURE_SPEECH_KEY/REGION."
         )
 
     return transcript
@@ -213,10 +220,6 @@ def _transcribe_batch(blob_url: str) -> str:
       2. GET  /transcriptions/{id}   → poll until Succeeded/Failed
       3. GET  /transcriptions/{id}/files → get result file URLs
       4. GET  result file URL        → download JSON, parse display text
-
-    Suitable for recordings > 5 minutes.
-    Azure processes these asynchronously — typically completes in
-    1–5 minutes depending on audio length.
     """
     key, region = _get_speech_rest_credentials()
     base_url = f"https://{region}.api.cognitive.microsoft.com/speechtotext/v3.1"
@@ -225,22 +228,42 @@ def _transcribe_batch(blob_url: str) -> str:
         "Content-Type": "application/json",
     }
 
-    # ── Submit transcription job ───────────────────────────────────────────────
-    payload = {
-        "contentUrls": [blob_url],
-        "locale": "en-US",
-        "displayName": f"contract-intel-{int(time.time())}",
-        "properties": {
-            "diarizationEnabled": True,   # separate speakers in output
-            "wordLevelTimestampsEnabled": False,
-            "punctuationMode": "DictatedAndAutomatic",
-            "profanityFilterMode": "None",
-        },
-    }
+    import os
 
+    use_container = os.getenv("BATCH_USE_CONTAINER", "false").strip().lower() in {"1","true","yes","y"}
+    if use_container:
+        payload = {
+            "contentContainerUrl": os.getenv("AUDIO_CONTAINER_SAS"),
+            "locale": "en-IN",  # or en-US if you prefer
+            "displayName": f"contract-intel-{int(time.time())}",
+            "properties": {
+                "diarizationEnabled": _ENABLE_DIARIZATION,
+                "wordLevelTimestampsEnabled": False,
+                "punctuationMode": "DictatedAndAutomatic",
+                "profanityFilterMode": "Masked",
+                "timeToLive": "PT48H",  # keep a TTL; current REST examples require/recommend it
+            },
+        }
+    else:
+        payload = {
+            "contentUrls": [blob_url],
+            "locale": "en-IN",
+            "displayName": f"contract-intel-{int(time.time())}",
+            "properties": {
+                "diarizationEnabled": _ENABLE_DIARIZATION,
+                "wordLevelTimestampsEnabled": False,
+                "punctuationMode": "DictatedAndAutomatic",
+                "profanityFilterMode": "Masked",
+                "timeToLive": "PT48H",
+            },
+        }
+    
     log.info("[Audio] Submitting batch transcription job...")
     resp = requests.post(f"{base_url}/transcriptions", headers=headers, json=payload)
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(
+            f"Batch transcription submit failed ({resp.status_code}): {resp.text}"
+        )
 
     job_url = resp.json()["self"]
     job_id = job_url.split("/")[-1]
@@ -262,6 +285,20 @@ def _transcribe_batch(blob_url: str) -> str:
         if status == "Succeeded":
             break
         elif status == "Failed":
+            # Try to surface the server's detailed failure report (if any)
+            try:
+                files_resp = requests.get(f"{job_url}/files", headers=headers)
+                if files_resp.ok:
+                    for f in files_resp.json().get("values", []):
+                        kind = f.get("kind", "")
+                        if "Report" in kind or kind == "TranscriptionReport":
+                            rep = requests.get(f["links"]["contentUrl"])
+                            if rep.ok:
+                                log.error("[Audio] Batch failure report: %s", rep.text[:2000])
+                                break
+            except Exception:
+                pass  # don't hide the main error
+
             error = status_data.get("properties", {}).get("error", {})
             raise RuntimeError(
                 f"Batch transcription failed: {error.get('message', 'unknown error')}"
@@ -279,8 +316,7 @@ def _transcribe_batch(blob_url: str) -> str:
 
     # Find the transcript result file (not the report file)
     result_url = next(
-        (f["links"]["contentUrl"] for f in files
-         if f.get("kind") == "Transcription"),
+        (f["links"]["contentUrl"] for f in files if f.get("kind") == "Transcription"),
         None,
     )
 
@@ -296,7 +332,6 @@ def _transcribe_batch(blob_url: str) -> str:
     phrases = result_data.get("recognizedPhrases", [])
     lines: list[str] = []
     for phrase in phrases:
-        # Best alternative is index 0
         best = (phrase.get("nBest") or [{}])[0]
         display = best.get("display", "").strip()
         if display:
@@ -306,12 +341,12 @@ def _transcribe_batch(blob_url: str) -> str:
 
     transcript = "\n".join(lines)
 
-    # Clean up batch job (optional — avoids cluttering Speech resource)
+    # Clean up batch job (optional)
     try:
         requests.delete(job_url, headers={"Ocp-Apim-Subscription-Key": key})
         log.info(f"[Audio] Batch job {job_id} deleted after retrieval")
     except Exception:
-        pass  # Non-fatal — job will expire automatically
+        pass
 
     return transcript
 
@@ -330,8 +365,8 @@ def _extract_from_transcript(transcript: str, contract_type: str) -> dict:
     """
     Send transcript to GPT-4o-mini to extract contract fields.
 
-    Uses the same field names as CU analyzer outputs so the mapping
-    matrix treats audio extractions identically to PDF/DOCX ones.
+    Uses the same field names as CU analyzer outputs so the mapping matrix
+    treats audio extractions identically to PDF/DOCX ones.
     """
     from config.azure_clients import get_openai_client, get_openai_deployment
 
@@ -345,8 +380,7 @@ def _extract_from_transcript(transcript: str, contract_type: str) -> dict:
         model=deployment,
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
-        temperature=0,
-        max_tokens=1000,
+        max_completion_tokens=1000,  # o-series param name
     )
 
     raw = response.choices[0].message.content
@@ -357,7 +391,7 @@ def _extract_from_transcript(transcript: str, contract_type: str) -> dict:
         raise ValueError(f"LLM extraction returned invalid JSON: {e}") from e
 
     # Attach metadata
-    extracted["_confidence"] = 0.75   # audio extractions get slightly lower base confidence
+    extracted["_confidence"] = 0.75
     extracted["_llmUsed"] = deployment
 
     return extracted
