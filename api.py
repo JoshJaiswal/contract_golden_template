@@ -58,7 +58,7 @@ app = FastAPI(
 )
 
 def get_api_key_for_limit(request: Request):
-    return request.headers.ger("X-API-Key") or request.client.host
+    return request.headers.get("X-API-Key") or request.client.host
 limiter = Limiter(key_func=get_api_key_for_limit)
 app.state.limiter = limiter
 
