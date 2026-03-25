@@ -511,6 +511,39 @@ div[data-testid="stMetric"] {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+.timeline-container { display: flex; gap: 18px; align-items: center; }
+
+.tl-step { display: flex; align-items: center; position: relative; }
+.tl-line { width: 60px; height: 3px; margin: 0 6px; border-radius: 4px; }
+
+.tl-dot { 
+    width: 26px; height: 26px; 
+    border-radius: 50%;
+    display: flex; justify-content: center; align-items: center;
+    font-size: 13px; font-weight: 600;
+}
+.tl-dot-done { background: var(--green); color: white; }
+.tl-dot-active { background: var(--yellow); color: black; }
+.tl-dot-idle { background: var(--border); color: black; }
+
+.tl-label { font-size: 13px; margin-top: 4px; text-align: center; }
+.tl-label-done { color: var(--green); }
+.tl-label-active { color: var(--yellow); }
+
+.conflict-box {
+    border: 1px solid #333; padding: 16px; border-radius: 8px;
+    margin-bottom: 18px; background: #1c1c1c;
+}
+.conflict-title { font-weight: bold; margin-bottom: 12px; }
+.conflict-body { display: flex; gap: 24px; }
+.conflict-side { flex: 1; }
+.conflict-doc-label { font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+.conflict-text { background: #2a2a2a; padding: 10px; border-radius: 6px; }
+</style>
+""", unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────
@@ -579,42 +612,46 @@ def format_time(ts):
     except:
         return ts
 
-
 def render_timeline(status):
     steps = ["Uploaded", "Queued", "Processing", "Generating", "Complete"]
     status_map = {"queued": 1, "processing": 2, "generating": 3, "complete": 4}
     current = status_map.get(status.lower(), 0)
 
-    html = '<div class="timeline-wrap">'
+    html = '<div class="timeline-container">'
     for i, step in enumerate(steps):
-        if i < current:
-            dot_cls = "tl-dot-done"
-            lbl_cls = "tl-label tl-label-done"
+        is_last_step = (i == len(steps) - 1)
+        # Determine state
+        if i < current or (is_last_step and status == "complete"):
+            dot_class = "tl-dot tl-dot-done"
+            label_class = "tl-label tl-label-done"
             icon = "✓"
             line_color = "var(--green)"
         elif i == current:
-            dot_cls = "tl-dot-active"
-            lbl_cls = "tl-label tl-label-active"
+            dot_class = "tl-dot tl-dot-active"
+            label_class = "tl-label tl-label-active"
             icon = str(i + 1)
             line_color = "var(--border)"
         else:
-            dot_cls = "tl-dot-idle"
-            lbl_cls = "tl-label"
+            dot_class = "tl-dot tl-dot-idle"
+            label_class = "tl-label"
             icon = str(i + 1)
             line_color = "var(--border)"
 
+        # Line segment
         line_html = ""
         if i < len(steps) - 1:
             lc = "var(--green)" if i < current else "var(--border)"
-            line_html = f'<div class="tl-line" style="background:linear-gradient(90deg,{lc} 0%,{lc} 100%)"></div>'
+            line_html = f'<div class="tl-line" style="background:{lc};"></div>'
 
+        # Step block
         html += f"""
         <div class="tl-step">
             {line_html}
-            <div class="tl-dot {dot_cls}">{icon}</div>
-            <div class="{lbl_cls}">{step}</div>
+            <div class="{dot_class}">{icon}</div>
+            <div class="{label_class}">{step}</div>
         </div>
         """
+
     html += "</div>"
     return html
 
@@ -763,7 +800,7 @@ elif page == "Job Status":
         job = r.json()
         s = job["status"].lower()
 
-        timeline_ph.markdown(render_timeline(s), unsafe_allow_html=True)
+        timeline_ph.html(render_timeline(s))
         status_ph.markdown(
             f'<div style="display:flex;align-items:center;gap:12px;padding:10px 0">'
             f'{badge_html(s)}'
@@ -987,37 +1024,43 @@ elif page == "Contract Viewer":
             st.markdown(f'<div style="margin-bottom:16px">{badge_html("failed")} <span style="font-size:13px;color:var(--text-muted);margin-left:8px">{len(conflicts)} conflict(s) found</span></div>', unsafe_allow_html=True)
 
             for i, conflict in enumerate(conflicts):
-                # Support both dict-style and string-style conflicts
-                if isinstance(conflict, dict):
-                    field     = conflict.get("field", f"Conflict {i+1}")
-                    nda_val   = conflict.get("nda_value") or conflict.get("doc1") or conflict.get("value_a", "—")
-                    sow_val   = conflict.get("sow_value") or conflict.get("doc2") or conflict.get("value_b", "—")
-                    note      = conflict.get("note") or conflict.get("description", "")
-                else:
-                    # string fallback
-                    field   = f"Conflict {i+1}"
-                    nda_val = str(conflict)
-                    sow_val = "—"
-                    note    = ""
+                field = conflict.get("field", f"Conflict {i+1}")
+                chosen = conflict.get("chosen", "—")
+                source = conflict.get("chosenSource", "—")
 
-                st.markdown(f"""
-                <div class="conflict-card">
-                    <div class="conflict-header">
-                        ⚡ {field}
-                        {"· <span style='font-size:11px;color:#888'>" + note + "</span>" if note else ""}
-                    </div>
+                alts = conflict.get("alternatives", [])
+                overridden = "; ".join(
+                    f"{a.get('source', '?')}: {str(a.get('value',''))}"
+                    for a in alts
+                ) or "—"
+
+                conflict_html = f"""
+                <div class="conflict-box">
+                    <div class="conflict-title">⚡ {field}</div>
+
                     <div class="conflict-body">
+
                         <div class="conflict-side">
-                            <div class="conflict-doc-label">NDA / Document A</div>
-                            <div class="conflict-text">{nda_val}</div>
+                            <div class="conflict-doc-label">Chosen Value</div>
+                            <div class="conflict-text">{chosen}</div>
                         </div>
+
                         <div class="conflict-side">
-                            <div class="conflict-doc-label">SOW / Document B</div>
-                            <div class="conflict-text">{sow_val}</div>
+                            <div class="conflict-doc-label">Source</div>
+                            <div class="conflict-text">{source}</div>
                         </div>
+
+                        <div class="conflict-side">
+                            <div class="conflict-doc-label">Overridden</div>
+                            <div class="conflict-text">{overridden}</div>
+                        </div>
+
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """
+
+                st.html(conflict_html)
+
 
     # ── TAB: MISSING FIELDS ───────────────────
     with tabs[2]:
