@@ -9,25 +9,30 @@ A production-grade pipeline that transforms unstructured contract documents — 
 ```
 Input (PDF / DOCX / EML / MP3 / WAV / M4A)
           ↓
-  Modality normalisation
-  (pdf_handler / docx_handler / email_handler / audio_handler)
+Normalization layer
+(pdf_handler / docx_handler / email_handler / audio_handler)
           ↓
-  Azure Content Understanding — 3 specialised analyzers
-  (deal-intake · NDA · SOW)
+Per‑modality extraction
+  • PDF/DOCX → Azure Content Understanding (3 analyzers)
+  • Audio → Speech (SDK or Batch) → LLM extractor (llm_audio)
           ↓
-  Mapping matrix — 45+ field mappings
-  (canonical/mapping-matrix.yaml)
+Mapping matrix → canonical fields
+(canonical/mapping-matrix.yaml)
           ↓
-  Merge engine — conflict resolution + precedence rules
-  (orchestration/functions/merge_engine.py)
+Merge engine → conflict resolution & precedence
+(orchestration/functions/merge_engine.py)
           ↓
-  Canonical JSON — single source of truth
+Canonical JSON (single source of truth)
           ↓
-  PDF generator — dynamic NDA + SOW documents
-  (generation/generate_contract_pdf.py)
+PDF Generator → NDA / SOW auto-render
+(generation/generate_contract_pdf.py)
           ↓
-  FastAPI — async REST API with job polling
-  (api.py)
+One‑shot orchestrators
+  • run_pipeline.py (PDF/DOCX/EML)
+  • run_audio_pipeline.py (Audio E2E)
+          ↓
+FastAPI (optional) – async jobs, file upload/download
+(api.py)
 ```
 
 ---
@@ -55,7 +60,10 @@ Audio file
 Upload to Azure Blob Storage (container: audio-staging)
     ↓
 File < 5 MB?  →  Azure Speech SDK  (real-time, synchronous)
-File ≥ 5 MB?  →  Azure Speech REST (batch, async, speaker-diarized)
+File ≥ 5 MB?  →  Azure Speech REST (batch, async)
+          - Diarization enabled only for mono
+          - Stereo files are downmixed or diarization disabled automatically
+(note: “Azure Speech Batch does not support diarization for stereo audio.”)
     ↓
 Transcript text
     ↓
@@ -88,7 +96,16 @@ All extraction results are normalised to a single schema defined in `contract-pa
 
 ### Generation (`generation/`)
 
-`generate_contract_pdf.py` takes the canonical JSON and renders it into a formatted PDF using the `output-contract-template.docx` as a base. Clause selection is governed by `clause-selection-rules.yaml` — clauses are included or excluded based on canonical field values.
+`The PDF generator (generation/generate_contract_pdf.py) uses ReportLab to build fully styled NDA/SOW PDFs:
+
+Navy cover page
+Status banner
+Dynamic clause rendering
+Milestones, tables, obligations, exceptions
+Signature block
+Appendix: missing fields, conflicts, provenance
+
+It takes canonical JSON only — no docx template required.
 
 ---
 
@@ -224,7 +241,11 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
 
 # Azure Speech Services
 AZURE_SPEECH_KEY=your_speech_key
-AZURE_SPEECH_REGION=uksouth
+AZURE_SPEECH_REGION=swedencentral
+
+# Speech Batch transcription (container SAS)
+BATCH_USE_CONTAINER=true
+AUDIO_CONTAINER_SAS=https://<account>.blob.core.windows.net/<container>?<sas_token>
 ```
 
 ### GPT-4o-mini system prompt
@@ -247,6 +268,26 @@ Rules you must always follow:
 
 You are not a chat assistant. You are a deterministic JSON extraction system.
 Whatever the user prompt says takes highest priority.
+```
+### Analyzer Classification
+```
+Automatic NDA vs SOW Classification
+After merging the canonical package, run_audio_pipeline.py automatically determines whether the output PDF should be:
+
+NDA (if parties.ndaType == "NDA")
+SOW (if strong signals in scope.* or commercials.*)
+Can be overridden with --render nda|sow|both
+```
+Quick Examples:
+```
+# Audio → NDA PDF (auto)
+python -m orchestration.functions.run_audio_pipeline --input meeting.m4a
+
+# Audio → both NDA and SOW PDFs
+python -m orchestration.functions.run_audio_pipeline --input meeting.m4a --render both
+
+# PDF contract → canonical → NDA PDF
+python -m orchestration.functions.run_pipeline --input contract.pdf --type nda
 ```
 
 ### Run locally
@@ -321,6 +362,8 @@ contract-intelligence-platform/
 │   │   ├── map_to_canonical.py     # Applies mapping matrix
 │   │   ├── merge_engine.py         # Conflict resolution
 │   │   └── run_pipeline.py         # Top-level coordinator
+(PDF/DOCX/EML)
+│   │   └── run_audio_pipeline.py    # one‑shot audio 
 │   └── __init__.py
 │
 ├── search/                         # Index files for search/retrieval
@@ -422,7 +465,7 @@ The API is fully documented at `/docs`. A React or Next.js frontend can integrat
 5. File uploaded to Azure Blob container `audio-staging`
 6. File size determines transcription mode:
    - **< 5 MB** → Speech SDK continuous recognition (synchronous)
-   - **≥ 5 MB** → Speech REST batch API (async, with speaker diarization)
+   - **≥ 5 MB** → Speech REST batch API (async, no speaker diarization)
 7. Transcript sent to GPT-4o-mini with field extraction prompt
 8. Result tagged `_source: "llm_audio"` and returned to pipeline
 9. Mapping matrix + merge engine produce canonical JSON
