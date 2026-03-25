@@ -495,27 +495,43 @@ button[kind="primary"],
 }
 .stButton > button:hover { opacity: 0.88 !important; }
 
-/* ── TABS: larger font + active gold indicator ── */
+/* ── TABS: Bigger, Bolder, Premium Style ── */
+
 .stTabs [data-baseweb="tab-list"] {
   background: transparent !important;
-  gap: 4px;
+  gap: 8px;
   border-bottom: 1px solid var(--border) !important;
+  padding-bottom: 6px;
 }
+
+/* INACTIVE TAB */
 .stTabs [data-baseweb="tab"] {
   background: transparent !important;
   color: var(--text-muted) !important;
+
   font-family: 'DM Sans', sans-serif !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  border-radius: 0 !important;
-  padding: 10px 18px !important;
-  border-bottom: 2px solid transparent !important;
-  letter-spacing: 0.1px !important;
+  font-size: 18px !important;      /*  Bigger text */
+  font-weight: 700 !important;     /*  Bolder */
+  letter-spacing: 0.3px !important;
+
+  padding: 14px 26px !important;   /*  Taller + wider */
+  line-height: 22px !important;
+
+  border-radius: 6px 6px 0 0 !important;
+  border-bottom: 3px solid transparent !important;
+
+  transition: all 0.15s ease !important;
 }
+
+/* ACTIVE TAB */
 .stTabs [aria-selected="true"] {
   color: var(--gold) !important;
-  border-bottom: 2px solid var(--gold) !important;
-  background: rgba(255,230,0,0.04) !important;
+  background: rgba(255,230,0,0.08) !important;
+
+  border-bottom: 3px solid var(--gold) !important;
+
+  font-size: 19px !important;      /*  Slightly larger when active */
+  font-weight: 800 !important;     /*  Stronger emphasis */
 }
 
 .stProgress > div > div { background: var(--gold) !important; border-radius: 4px; }
@@ -1026,16 +1042,15 @@ SECTION_META = {
     "other":          {"icon": "📋", "label": "Other"},
 }
 
-
 def group_missing_fields(missing_list):
     sections = {}
     for f in missing_list:
         if isinstance(f, dict):
             label = f.get("field") or f.get("name", str(f))
-            hint  = f.get("hint") or f.get("description", "Required for compliance")
+            hint = f.get("hint") or f.get("description", "Required for compliance")
         else:
             label = str(f)
-            hint  = "Required for compliance"
+            hint = "Required for compliance"
 
         parts = label.split(".")
         section_key = parts[0].lower() if len(parts) > 1 else "other"
@@ -1054,48 +1069,30 @@ def group_missing_fields(missing_list):
 def render_missing_fields_tree(missing_list):
     sections = group_missing_fields(missing_list)
 
-    for idx, (sec_key, items) in enumerate(sections.items()):
+    for sec_key, items in sections.items():
         meta = SECTION_META.get(sec_key, {"icon": "📋", "label": sec_key.capitalize()})
 
-        toggle_id = f"mf_toggle_{idx}"
+        header = f"{meta['icon']} {meta['label']} · {len(items)} missing"
 
-        st.markdown(f"""
-        <div class="mf-section">
-
-            <input type="checkbox" id="{toggle_id}" class="mf-toggle">
-
-            <label for="{toggle_id}" class="mf-label">
-                <div>
-                    {meta['icon']} {meta['label']}
-                    <span class="mf-badge">{len(items)} missing</span>
+        with st.expander(header, expanded=False):
+            for item in items:
+                st.markdown(f"""
+                <div style="
+                    background:#1c1c22;
+                    border:1px solid #2d2d35;
+                    border-radius:8px;
+                    padding:12px 14px;
+                    margin-bottom:10px;
+                ">
+                    <div style="color:#ffcf4c;font-size:18px;margin-bottom:4px;">⚠</div>
+                    <div style="font-size:14px;font-weight:600;color:var(--text);">
+                        {item['label']}
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+                        {item['hint']}
+                    </div>
                 </div>
-                <span class="mf-chevron">▶</span>
-            </label>
-
-            <div class="mf-content">
-        """, unsafe_allow_html=True)
-
-        # FIELD CARDS
-        for item in items:
-
-            # Make the name clickable → updates URL with ?highlight=item.full
-            highlight = st.query_params.get("highlight", None)
-
-            # Build proper link
-            link = st.query_params
-            highlight_param = item["full"]
-
-            st.markdown(f"""
-            <a href="?highlight={highlight_param}" style="text-decoration:none;">
-                <div class="mf-card">
-                    <div class="mf-icon">⚠</div>
-                    <div class="mf-field">{item['label']}</div>
-                    <div class="mf-hint">{item['hint']}</div>
-                </div>
-            </a>
-            """, unsafe_allow_html=True)
-            
-        st.markdown("</div></div>", unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # PAGE: UPLOAD
@@ -1479,33 +1476,8 @@ elif page == "Contract Viewer":
     # ── TAB: RAW JSON ─────────────────────────
     with tabs[3]:
         st.markdown("<br>", unsafe_allow_html=True)
+        st.code(json.dumps(canonical, indent=2), language="json")
 
-        selected_field = st.query_params.get("highlight", None)
-
-        # Canonical JSON string
-        raw = json.dumps(canonical, indent=2)
-
-        # If a field was clicked
-        if selected_field:
-            anchor_id = selected_field.replace(".", "_")
-
-            raw = raw.replace(
-                f"\"{selected_field}\"",
-                f"<a id='{anchor_id}'></a><span class='highlight-json'>\"{selected_field}\"</span>"
-            )
-
-            # auto-scroll
-            st.markdown(f"""
-            <script>
-                var el = document.getElementById("{anchor_id}");
-                if(el) {{
-                    el.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                }}
-            </script>
-            """, unsafe_allow_html=True)
-
-        # Render JSON with <pre>
-        st.markdown(f"<pre>{raw}</pre>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────
