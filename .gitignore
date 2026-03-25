@@ -60,6 +60,8 @@ crash.log
 *.key
 
 out/
+api_uploads/
+api_outputs/
 __pycache__/
 *.pyc
 .env
