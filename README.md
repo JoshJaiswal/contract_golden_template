@@ -307,6 +307,184 @@ python test_api.py --file tests/fixtures/deal-intake-sample-structured.pdf
 # SOW fixture
 python test_api.py --file tests/fixtures/sow_email.pdf
 ```
+Here is a **clean, polished, ready‑to‑paste README section** specifically for your **Golden Test Suite**, matching your repo’s Makefile, pytest markers, fixtures, and file structure.
+
+Just copy this into your README under a “Testing” or “Developer Guide” section.
+
+***
+
+# **Testing & Golden Snapshot Suite**
+
+This repository includes a **full multi‑layer test suite** that validates the contract‑intelligence pipeline end‑to‑end — from mapping and merging to PDF generation and full Azure‑backed extraction.  
+Tests are grouped using **pytest markers** and executed via either `pytest` or the provided **Makefile** shortcuts.
+
+***
+
+## Test Types
+
+### **Unit Tests (`-m unit`)**
+
+Fast, pure‑Python tests.  
+No Azure, no Blob Storage, no network calls.
+
+Validates:
+
+*   `map_to_canonical` transforms
+*   `merge_engine` conflict resolution
+*   canonical schema shape
+*   PDF utility helpers
+*   provenance + rule precedence logic
+
+Run:
+
+```bash
+pytest -m unit -v
+```
+
+***
+
+### **PDF Generation Tests (`-m pdf`)**
+
+Validate the ReportLab PDF renderer:
+
+*   NDA & SOW PDFs generate correctly
+*   Milestones tables
+*   Risk register
+*   Conflict appendix
+*   Empty canonical handling
+*   Output directory auto‑creation
+
+Run:
+
+```bash
+pytest -m pdf -v
+```
+
+***
+
+### **Golden Snapshot Tests (`-m golden`)**
+
+These compare pipeline outputs to frozen **golden JSON files** stored in:
+
+    tests/golden-cases/
+
+Useful for:
+
+*   Regression detection after mapping/merge/schema changes
+*   Ensuring stable canonical outputs
+
+Run:
+
+```bash
+pytest -m golden -v
+```
+
+***
+
+### **Integration Tests (`-m integration`)**
+
+Full Azure‑backed pipeline tests.
+
+Requires:
+
+*   `.env` with valid Azure keys
+*   CU/LLM/Speech/Blob services
+*   A valid **container SAS** (`AUDIO_CONTAINER_SAS`)
+
+Run:
+
+```bash
+pytest -m integration -v
+```
+
+These tests use real fixtures:
+
+    tests/fixtures/deal-intake-sample-structured.pdf
+    tests/fixtures/sow_email.pdf
+    tests/fixtures/*.m4a (optional)
+
+If audio fixtures are missing, tests skip gracefully.
+
+***
+
+## Makefile Commands (Windows users: use `pytest` directly or run in Git Bash)
+
+    # Fast unit tests (recommended before every commit)
+    make test-unit
+
+    # Validate PDF rendering
+    make test-pdf
+
+    # Compare against golden snapshots
+    make test-golden
+
+    # Unit + PDF + Golden (no Azure needed)
+    make test
+
+    # Full suite including Azure integrations
+    make test-all
+
+    # Regenerate golden snapshot files
+    make generate-golden
+
+***
+
+## Regenerating Golden Snapshots
+
+If you intentionally modify:
+
+*   `mapping-matrix.yaml`,
+*   `merge_engine.py`,
+*   `contract-package.schema.json`, or
+*   any extraction behavior,
+
+then regenerate golden files:
+
+```bash
+make generate-golden
+```
+
+Equivalent manual command:
+
+```bash
+pytest -m integration -v --generate-golden
+```
+
+This rewrites all JSON snapshots under:
+
+    tests/golden-cases/
+
+***
+
+## Running Tests on Windows
+
+Windows does **not** include `make` by default.  
+Options:
+
+*   Use **pytest directly** (recommended):
+    ```bash
+    pytest -m unit -v
+    pytest -m pdf -v
+    pytest -m golden -v
+    pytest -m integration -v
+    ```
+*   Or run `make` inside **Git Bash**
+*   Or install GNU Make via Chocolatey:
+    ```powershell
+    choco install make
+    ```
+
+***
+
+## ✅ Why This Suite Matters
+
+*   Guarantees **deterministic canonical JSON** after mapping & merge
+*   Ensures **PDFs remain valid** across template or clause updates
+*   Detects regressions when adding new sources (e.g., `llm_audio`)
+*   Validates schema evolution safely
+*   Enables safe refactors and production‑grade CI/CD
+
+***
 
 ---
 
