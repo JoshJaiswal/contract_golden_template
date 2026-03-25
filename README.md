@@ -1,5 +1,7 @@
 # Contract Intelligence Platform
 
+![CI](https://github.com/JoshJaiswal/contract_golden_template/actions/workflows/tests.yml/badge.svg)
+
 A production-grade pipeline that transforms unstructured contract documents — PDFs, Word docs, emails, and audio recordings — into standardised NDA and SOW PDFs using Azure AI services.
 
 ---
@@ -476,7 +478,7 @@ Options:
 
 ***
 
-## ✅ Why This Suite Matters
+## Why This Suite Matters
 
 *   Guarantees **deterministic canonical JSON** after mapping & merge
 *   Ensures **PDFs remain valid** across template or clause updates
@@ -652,6 +654,45 @@ The API is fully documented at `/docs`. A React or Next.js frontend can integrat
 
 ---
 
+---
+
+## Continuous Integration (GitHub Actions)
+
+This repository includes a full CI workflow using **GitHub Actions**.
+
+Every time you **push** or create a **pull request**, GitHub automatically:
+
+checks out the code  
+sets up Python  
+installs all dependencies  
+runs:
+  - unit tests (`-m unit`)
+  - PDF tests (`-m pdf`)
+  - golden snapshot tests (`-m "golden and not integration"`)  
+reports pass/fail status  
+updates the CI badge at the top of this README
+
+The CI workflow file lives at:
+.github/workflows/tests.yml
+
+You can see all CI runs here:
+
+**https://github.com/JoshJaiswal/contract_golden_template/actions**
+
+### Why CI Matters
+
+- Prevents accidental breaks to the mapping matrix  
+- Ensures merge engine precedence rules stay correct  
+- Guarantees PDF output consistency  
+- Protects canonical schema evolution  
+- Allows safe refactoring  
+- Provides confidence before deployment  
+
+Integration tests (`-m integration`) are intentionally **skipped in CI**  
+because they require Azure credentials (Speech, CU, Blob, OpenAI).
+These tests are meant to be run manually on a dev machine.
+
+---
 ## Licence
 
 Private. All rights reserved.
