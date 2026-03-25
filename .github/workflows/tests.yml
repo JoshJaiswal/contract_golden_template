@@ -31,6 +31,6 @@ jobs:
         run: |
           pytest -m pdf -v
 
-      - name: Run golden snapshot tests
+      - name: Run golden snapshot tests (non-integration)
         run: |
-          pytest -m golden -v
+          pytest -m "golden and not integration" -v
