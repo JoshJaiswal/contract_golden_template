@@ -8,7 +8,7 @@ import argparse
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1118,7 +1118,7 @@ def build_appendix(canonical, styles, doc_type="sow"):
 def generate_pdf(canonical: dict, doc_type: str, output_path: str) -> str:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     styles = build_styles()
-    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     
     parties = canonical.get("parties", {})
     client = parties.get("client", {}).get("name", "CLIENT")

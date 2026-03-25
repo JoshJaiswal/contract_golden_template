@@ -179,7 +179,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "parties.vendor.name",
@@ -187,7 +187,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "parties.ndaType",
@@ -203,7 +203,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "scope.description",
@@ -211,7 +211,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "scope.deliverables",
@@ -219,7 +219,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "scope.outOfScope",
@@ -227,7 +227,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "scope.milestones",
@@ -235,7 +235,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "confidentiality.term",
@@ -259,7 +259,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "commercials.paymentTerms",
@@ -267,7 +267,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "commercials.currency",
@@ -275,7 +275,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.807
+      "confidence": 0.808
     },
     {
       "canonicalPath": "commercials.pricingModel",
@@ -283,7 +283,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "commercials.taxes",
@@ -291,7 +291,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "security.requirements",
@@ -299,7 +299,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "security.dataResidency",
@@ -315,7 +315,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "security.personalDataProcessing",
@@ -331,7 +331,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "legal.governingLaw",
@@ -355,7 +355,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "legal.ipOwnership",
@@ -363,7 +363,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     },
     {
       "canonicalPath": "projectGovernance.projectTimeline",
@@ -371,7 +371,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.686
+      "confidence": 0.678
     }
   ],
   "review": {
