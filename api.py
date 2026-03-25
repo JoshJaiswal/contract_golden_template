@@ -409,6 +409,16 @@ def _safe_filename(job_id: str, doc_type: str) -> str:
     safe = safe.strip()[:40] or "contract"
     return f"{safe}-{doc_type}.pdf"
 
+@app.get("/download/{job_id}/canonical", tags=["Downloads"])
+def download_canonical(job_id: str, _key: str = Security(verify_api_key)):
+    canonical_path = OUTPUT_DIR / job_id / "canonical.json"
+    if not canonical_path.exists():
+        raise HTTPException(status_code=404, detail="Canonical JSON not found")
+    return FileResponse(
+        canonical_path,
+        media_type="application/json",
+        filename=f"{job_id}-canonical.json"
+    )
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
