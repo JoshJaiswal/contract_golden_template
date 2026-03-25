@@ -12,7 +12,7 @@
   },
   "dates": {
     "effectiveDate": "2026-03-13",
-    "expirationDate": "Pilot duration: 12 weeks",
+    "expirationDate": "",
     "executionDate": ""
   },
   "scope": {
@@ -72,7 +72,7 @@
     "changeControl": "",
     "issueEscalation": "",
     "governanceModel": "",
-    "projectTimeline": "Target NDA execution: 2026-03-18 Pilot kickoff: 2026-03-24 Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6",
+    "projectTimeline": "Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6",
     "keyPersonnel": "",
     "dependencies": "",
     "assumptions": "",
@@ -82,6 +82,7 @@
   "missingFields": [
     "parties.client.signatories",
     "parties.vendor.signatories",
+    "dates.expirationDate",
     "dates.executionDate",
     "scope.sowReferenceId",
     "scope.locationAndTravel",
@@ -178,7 +179,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "parties.vendor.name",
@@ -186,7 +187,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "parties.ndaType",
@@ -194,7 +195,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "dates.effectiveDate",
@@ -202,15 +203,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
-    },
-    {
-      "canonicalPath": "dates.expirationDate",
-      "value": "Pilot duration: 12 weeks",
-      "sourceDocumentId": "",
-      "sourceField": "sow",
-      "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.807
     },
     {
       "canonicalPath": "scope.description",
@@ -218,7 +211,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "scope.deliverables",
@@ -226,7 +219,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "scope.outOfScope",
@@ -234,7 +227,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "scope.milestones",
@@ -242,7 +235,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "confidentiality.term",
@@ -250,7 +243,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "confidentiality.exceptions",
@@ -258,7 +251,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "commercials.totalValue",
@@ -266,7 +259,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "commercials.paymentTerms",
@@ -274,7 +267,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "commercials.currency",
@@ -282,7 +275,7 @@
       "sourceDocumentId": "",
       "sourceField": "deal_intake",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.806
+      "confidence": 0.807
     },
     {
       "canonicalPath": "commercials.pricingModel",
@@ -290,7 +283,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "commercials.taxes",
@@ -298,7 +291,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "security.requirements",
@@ -306,7 +299,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "security.dataResidency",
@@ -314,7 +307,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "security.complianceStandards",
@@ -322,7 +315,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "security.personalDataProcessing",
@@ -330,7 +323,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "security.privacyRequirements",
@@ -338,7 +331,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "legal.governingLaw",
@@ -346,7 +339,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "legal.jurisdiction",
@@ -354,7 +347,7 @@
       "sourceDocumentId": "",
       "sourceField": "nda",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.85
+      "confidence": 0.841
     },
     {
       "canonicalPath": "legal.liabilityCap",
@@ -362,7 +355,7 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "legal.ipOwnership",
@@ -370,15 +363,15 @@
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     },
     {
       "canonicalPath": "projectGovernance.projectTimeline",
-      "value": "Target NDA execution: 2026-03-18 Pilot kickoff: 2026-03-24 Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6",
+      "value": "Pilot duration: 12 weeks Weekly status calls; mid-pilot checkpoint at week 6",
       "sourceDocumentId": "",
       "sourceField": "sow",
       "sourceFamily": "cu_analyzer",
-      "confidence": 0.682
+      "confidence": 0.686
     }
   ],
   "review": {
