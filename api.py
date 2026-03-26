@@ -613,6 +613,17 @@ def _regenerate_sync(
         if c.get("field") not in resolved_fields
     ]
 
+    # Remove missing fields that the user has now supplied values for.
+    # missingFields entries are stored as dot-notation strings (e.g. "parties.client.name")
+    # which match the override keys exactly — prune them so the PDF banner and
+    # appendix reflect the corrected counts rather than the stale original counts.
+    existing_missing = canonical.get("missingFields", [])
+    if existing_missing:
+        canonical["missingFields"] = [
+            f for f in existing_missing
+            if (f if isinstance(f, str) else f.get("field", "")) not in resolved_fields
+        ]
+
     # Persist patched canonical
     with open(canonical_path, "w") as f:
         json.dump(canonical, f, indent=2)

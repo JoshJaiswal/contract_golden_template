@@ -548,6 +548,38 @@ div[data-testid="stMetric"] {
 #MainMenu, footer, header { visibility: hidden; }
 .stDeployButton { display: none; }
 
+/* ── MISSING FIELD INPUT STATES ── */
+/* Default: neutral border */
+div[data-testid="stTextInput"] input {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border-bright) !important;
+  border-radius: 6px !important;
+  color: var(--text) !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+/* Focus (typing): red glow to indicate "needs filling" */
+div[data-testid="stTextInput"] input:focus:placeholder-shown {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 2px rgba(255,77,77,0.18) !important;
+  outline: none !important;
+}
+/* Filled + focused: green glow — confirmed entry */
+div[data-testid="stTextInput"] input:focus:not(:placeholder-shown) {
+  border-color: var(--green) !important;
+  box-shadow: 0 0 0 2px rgba(0,232,122,0.18) !important;
+  outline: none !important;
+}
+/* Filled + blurred: subtle green border to show it's done */
+div[data-testid="stTextInput"] input:not(:placeholder-shown) {
+  border-color: rgba(0,232,122,0.45) !important;
+  box-shadow: none !important;
+}
+/* Blurred + empty: back to neutral — no red residue */
+div[data-testid="stTextInput"] input:not(:focus):placeholder-shown {
+  border-color: var(--border-bright) !important;
+  box-shadow: none !important;
+}
+
 /* ── FOOTER ── */
 .ey-footer {
   margin-top: 60px;

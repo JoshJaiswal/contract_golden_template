@@ -381,26 +381,51 @@ def dynamic_clause(number, title, extracted, fallback, styles, is_dynamic=False)
 # ==========================================
 
 def build_status_banner(canonical, styles):
-    review = canonical.get("review", {})
-    status = review.get("status", "needs_review")
-    reasons = review.get("reviewReason", [])
-    missing = canonical.get("missingFields", [])
+    # ── Always recompute from live data — never trust stale reviewReason strings ──
+    # reviewReason is written once at extraction time and becomes stale after
+    # the user resolves conflicts or fills missing fields via regeneration.
+    conflicts = canonical.get("conflicts", [])
+    missing   = canonical.get("missingFields", [])
+
+    # Recompute critical missing fields from the current (pruned) missingFields list
+    critical = [
+        f for f in missing
+        if any(k in (f if isinstance(f, str) else f.get("field", ""))
+               for k in ("client.name", "vendor.name", "effectiveDate"))
+    ]
+
+    # Derive live status: only "needs_review" if there are still unresolved
+    # conflicts OR critical fields still missing — otherwise mark clean.
+    has_issues = bool(conflicts) or bool(critical)
+
     elems = []
-    
-    if status == "needs_review":
+
+    if has_issues:
+        # Build reason line from live counts — never from the stale reviewReason field
+        live_reasons = []
+        if conflicts:
+            live_reasons.append(f"{len(conflicts)} field conflict{'s' if len(conflicts) != 1 else ''} found")
+        if critical:
+            live_reasons.append(f"Critical fields missing: {critical}")
+
         content = "<b>⚠ REQUIRES HUMAN REVIEW BEFORE USE</b>"
-        if reasons: 
-            content += "<br/>" + "  ·  ".join(reasons)
+        if live_reasons:
+            content += "<br/>" + "  ·  ".join(live_reasons)
         elems.append(info_box(content, styles, bg=AMBER_BG, border=AMBER))
     else:
-        elems.append(info_box("<b>✓ Auto-extracted with no conflicts detected.</b>  Verify all fields before execution.", styles, bg=GREEN_BG, border=colors.HexColor("#059669")))
-        
-    critical = [f for f in missing if any(k in f for k in ("client.name", "vendor.name", "effectiveDate"))]
+        elems.append(info_box(
+            "<b>✓ All conflicts resolved and critical fields present.</b>  "
+            "Verify all fields before execution.",
+            styles, bg=GREEN_BG, border=colors.HexColor("#059669")))
+
+    # Critical missing fields red callout box (shown in addition to banner)
     if critical:
         elems.append(Spacer(1, 4))
-        elems.append(info_box("<b>Critical fields not found:</b>  " + ",  ".join(critical), styles, bg=RED_BG, border=RED))
-        
-        # Flag India data protection requirement if personal data present
+        elems.append(info_box(
+            "<b>Critical fields not found:</b>  " + ",  ".join(critical),
+            styles, bg=RED_BG, border=RED))
+
+    # Flag India data protection requirement if personal data present
     security = canonical.get("security", {})
     if str(security.get("personalDataProcessing", "")).lower() == "yes":
         elems.append(Spacer(1, 4))
