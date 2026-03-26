@@ -1478,47 +1478,158 @@ elif page == "Contract Viewer":
                 return v if any(val for val in v.values() if val not in (None, "", [], {})) else None
             return str(v) if v else None
 
-        def render_summary_row(key, val, icon=""):
-            """Render one clean summary row — handles str, list, dict."""
+        # ── Session state for summary inline edits ──────────────────────
+        if "summary_edits" not in st.session_state:
+            st.session_state.summary_edits   = {}   # {canon_path: new_value}
+        if "summary_editing" not in st.session_state:
+            st.session_state.summary_editing = set() # paths open in edit mode
+
+        st.markdown("""
+        <style>
+        [data-testid="stButton"] button[title^="Edit "] {
+          background:transparent!important;border:1px solid transparent!important;
+          color:#444!important;padding:1px 6px!important;font-size:11px!important;
+          height:24px!important;min-height:unset!important;box-shadow:none!important;
+        }
+        [data-testid="stButton"] button[title^="Edit "]:hover {
+          background:rgba(255,230,0,0.1)!important;
+          border-color:rgba(255,230,0,0.3)!important;color:var(--gold)!important;
+        }
+        [data-testid="stButton"] button[title="Save"],
+        [data-testid="stButton"] button[title="Cancel"] {
+          background:transparent!important;border:1px solid #333!important;
+          color:#999!important;padding:2px 8px!important;height:28px!important;
+          min-height:unset!important;box-shadow:none!important;font-size:12px!important;
+        }
+        [data-testid="stButton"] button[title="Save"]:hover {
+          border-color:var(--green)!important;color:var(--green)!important;
+          background:rgba(0,232,122,0.08)!important;
+        }
+        [data-testid="stButton"] button[title="Cancel"]:hover {
+          border-color:var(--red)!important;color:var(--red)!important;
+          background:rgba(255,77,77,0.08)!important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        def fmt_val(v):
+            if v is None: return None
+            if isinstance(v, str): s = v.strip(); return s if s else None
+            if isinstance(v, list):
+                items = [str(i).strip() for i in v if str(i).strip()]
+                return items if items else None
+            if isinstance(v, dict):
+                return v if any(val for val in v.values() if val not in (None, "", [], {})) else None
+            return str(v) if v else None
+
+        def _patch_canonical(dot_path, new_value):
+            """
+            Update the canonical JSON dict using a dot-path.
+            Example: dot_path='legal.governingLaw'
+            """
+            try:
+                parts = dot_path.split(".")
+                ref = canonical
+
+                # Traverse until second last
+                for p in parts[:-1]:
+                    if p not in ref or not isinstance(ref[p], dict):
+                        ref[p] = {}
+                    ref = ref[p]
+
+                # Update the final leaf
+                ref[parts[-1]] = new_value
+
+            except Exception as e:
+                print("Patch Error:", e)
+
+        def render_summary_row(key, val, icon="", canon_path=""):
+            """Render a summary row with inline pencil edit.
+            canon_path: dot-path into canonical JSON e.g. 'legal.governingLaw'
+            """
             if val is None:
                 return
-            if isinstance(val, list):
-                bullets = "".join(
-                    f'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">'
-                    f'<div style="color:var(--gold);margin-top:2px;font-size:10px;">▸</div>'
-                    f'<div style="font-size:13px;color:var(--text);line-height:1.5;">{item}</div>'
-                    f'</div>'
-                    for item in val
-                )
-                st.markdown(f"""
-                <div class="summary-row" style="align-items:flex-start;">
-                  <div class="summary-key">{icon} {key}</div>
-                  <div style="flex:1;padding-top:2px;">{bullets}</div>
-                </div>""", unsafe_allow_html=True)
-            elif isinstance(val, dict):
-                # Render sub-fields as pill pairs
-                pairs = "".join(
-                    f'<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:6px;">'
-                    f'<div style="font-size:10px;font-family:\'DM Mono\',monospace;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;min-width:120px;">{k}</div>'
-                    f'<div style="font-size:13px;color:var(--text);">{str(dv)}</div>'
-                    f'</div>'
-                    for k, dv in val.items()
-                    if dv not in (None, "", [], {})
-                )
-                if pairs:
-                    st.markdown(f"""
-                    <div class="summary-row" style="align-items:flex-start;">
-                      <div class="summary-key">{icon} {key}</div>
-                      <div style="flex:1;padding-top:2px;">{pairs}</div>
-                    </div>""", unsafe_allow_html=True)
+            fk = canon_path if canon_path else key.lower().replace(" ", "_")
+            is_editing = fk in st.session_state.summary_editing
+            is_edited  = fk in st.session_state.summary_edits
+            display_val = st.session_state.summary_edits[fk] if is_edited else val
+
+            if isinstance(display_val, list):
+                flat = "\n".join(str(i) for i in display_val)
+            elif isinstance(display_val, dict):
+                flat = "\n".join(f"{k}: {v}" for k, v in display_val.items() if v not in (None, "", [], {}))
+            else:
+                flat = str(display_val) if display_val is not None else ""
+
+            edited_pill = (
+                ' <span style="display:inline-flex;align-items:center;gap:3px;'
+                'font-size:10px;font-family:\'DM Mono\',monospace;color:var(--gold);'
+                'background:rgba(255,230,0,0.1);border:1px solid rgba(255,230,0,0.2);'
+                'border-radius:4px;padding:1px 5px;">✎ edited</span>'
+            ) if is_edited else ""
+
+            if not is_editing:
+                if isinstance(display_val, list) and not is_edited:
+                    bullets = "".join(
+                        f'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">'
+                        f'<div style="color:var(--gold);margin-top:2px;font-size:10px;">▸</div>'
+                        f'<div style="font-size:13px;color:var(--text);line-height:1.5;">{item}</div></div>'
+                        for item in display_val
+                    )
+                    val_html = f'<div style="flex:1;padding-top:2px;">{bullets}</div>'
+                elif isinstance(display_val, dict) and not is_edited:
+                    pairs = "".join(
+                        f'<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:6px;">'
+                        f'<div style="font-size:10px;font-family:\'DM Mono\',monospace;color:var(--text-muted);'
+                        f'text-transform:uppercase;letter-spacing:0.4px;min-width:120px;">{k}</div>'
+                        f'<div style="font-size:13px;color:var(--text);">{str(dv)}</div></div>'
+                        for k, dv in display_val.items() if dv not in (None, "", [], {})
+                    )
+                    if not pairs: return
+                    val_html = f'<div style="flex:1;padding-top:2px;">{pairs}</div>'
+                else:
+                    color = "var(--gold)" if is_edited else "var(--text)"
+                    val_html = f'<div class="summary-val" style="color:{color};">{flat}{edited_pill}</div>'
+
+                col_val, col_btn = st.columns([22, 1])
+                with col_val:
+                    st.markdown(
+                        f'<div class="summary-row" style="align-items:flex-start;">'
+                        f'<div class="summary-key">{icon} {key}</div>{val_html}</div>',
+                        unsafe_allow_html=True
+                    )
+                with col_btn:
+                    st.markdown('<div style="padding-top:10px">', unsafe_allow_html=True)
+                    if st.button("✎", key=f"eb_{fk}", help=f"Edit {key}"):
+                        st.session_state.summary_editing.add(fk)
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.markdown(
-                    f'<div class="summary-row">'
-                    f'<div class="summary-key">{icon} {key}</div>'
-                    f'<div class="summary-val">{val}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
+                    f'<div style="padding:6px 0 2px 0;font-family:\'DM Mono\',monospace;'
+                    f'font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:0.6px;">'
+                    f'{icon} {key}</div>', unsafe_allow_html=True
                 )
+                col_inp, col_save, col_cancel = st.columns([16, 1.3, 1.3])
+                with col_inp:
+                    new_text = st.text_area(f"edit_{fk}", value=flat, key=f"ei_{fk}",
+                                            label_visibility="collapsed", height=72)
+                with col_save:
+                    st.markdown('<div style="padding-top:6px">', unsafe_allow_html=True)
+                    if st.button("✓", key=f"sv_{fk}", help="Save"):
+                        st.session_state.summary_edits[fk] = new_text
+                        if canon_path:
+                            _patch_canonical(canon_path, new_text)
+                        st.session_state.summary_editing.discard(fk)
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+                with col_cancel:
+                    st.markdown('<div style="padding-top:6px">', unsafe_allow_html=True)
+                    if st.button("✕", key=f"cx_{fk}", help="Cancel"):
+                        st.session_state.summary_editing.discard(fk)
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown('<div style="border-bottom:1px solid var(--border);margin:4px 0 6px 0"></div>', unsafe_allow_html=True)
 
         # ── Parties block ──
         parties = canonical.get("parties", {})
@@ -1568,14 +1679,10 @@ elif page == "Contract Viewer":
                  color:var(--text-muted);letter-spacing:1.2px;text-transform:uppercase;
                  margin-bottom:10px;">Dates</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
-            cols = st.columns(len(date_fields), gap="small")
-            for col, (label, val) in zip(cols, date_fields.items()):
-                with col:
-                    st.markdown(f"""
-                    <div style="font-size:10px;font-family:'DM Mono',monospace;color:var(--text-muted);
-                         text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">{label}</div>
-                    <div style="font-size:14px;font-weight:600;color:var(--text);">{val}</div>
-                    """, unsafe_allow_html=True)
+            date_paths = {"Effective Date":"dates.effectiveDate","Expiry Date":"dates.expiryDate",
+                "Execution Date":"dates.executionDate","Review Date":"dates.reviewDate"}
+            for label, val in date_fields.items():
+                render_summary_row(label, fmt_val(val), canon_path=date_paths.get(label,""))
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Legal block ──
@@ -1593,8 +1700,11 @@ elif page == "Contract Viewer":
                  color:var(--text-muted);letter-spacing:1.2px;text-transform:uppercase;
                  margin-bottom:10px;">Legal</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
+            legal_paths = {"Governing Law":"legal.governingLaw","Jurisdiction":"legal.jurisdiction",
+                "Liability Cap":"legal.liabilityCap","IP Ownership":"legal.ipOwnership",
+                "Dispute Resolution":"legal.disputeResolution"}
             for label, val in legal_fields.items():
-                render_summary_row(label, fmt_val(val))
+                render_summary_row(label, fmt_val(val), canon_path=legal_paths.get(label,""))
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Confidentiality block ──
@@ -1608,11 +1718,11 @@ elif page == "Contract Viewer":
                  margin-bottom:10px;">Confidentiality</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
             if conf_term:
-                render_summary_row("Term", fmt_val(conf_term))
+                render_summary_row("Term", fmt_val(conf_term), canon_path="confidentiality.term")
             if conf_obligations:
-                render_summary_row("Obligations", fmt_val(conf_obligations))
+                render_summary_row("Obligations", fmt_val(conf_obligations), canon_path="confidentiality.obligations")
             if conf_exceptions:
-                render_summary_row("Exceptions", fmt_val(conf_exceptions))
+                render_summary_row("Exceptions", fmt_val(conf_exceptions), canon_path="confidentiality.exceptions")
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Scope of Work block ──
@@ -1627,13 +1737,13 @@ elif page == "Contract Viewer":
                  margin-bottom:10px;">Scope of Work</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
             if scope_desc:
-                render_summary_row("Description", fmt_val(scope_desc))
+                render_summary_row("Description", fmt_val(scope_desc), canon_path="scope.description")
             if scope_deliv:
-                render_summary_row("Deliverables", fmt_val(scope_deliv) if isinstance(scope_deliv, list) else fmt_val(scope_deliv))
+                render_summary_row("Deliverables", fmt_val(scope_deliv), canon_path="scope.deliverables")
             if scope_out:
-                render_summary_row("Out of Scope", fmt_val(scope_out) if isinstance(scope_out, list) else fmt_val(scope_out))
+                render_summary_row("Out of Scope", fmt_val(scope_out), canon_path="scope.outOfScope")
             if scope_miles:
-                render_summary_row("Milestones", fmt_val(scope_miles) if isinstance(scope_miles, list) else fmt_val(scope_miles))
+                render_summary_row("Milestones", fmt_val(scope_miles), canon_path="scope.milestones")
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Commercials block ──
@@ -1651,8 +1761,11 @@ elif page == "Contract Viewer":
                  color:var(--text-muted);letter-spacing:1.2px;text-transform:uppercase;
                  margin-bottom:10px;">Commercials</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
+            comm_paths = {"Total Value":"commercials.totalValue","Currency":"commercials.currency",
+                "Payment Terms":"commercials.paymentTerms","Pricing Model":"commercials.pricingModel",
+                "Taxes":"commercials.taxes"}
             for label, val in comm_fields.items():
-                render_summary_row(label, fmt_val(val))
+                render_summary_row(label, fmt_val(val), canon_path=comm_paths.get(label,""))
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Security block ──
@@ -1669,8 +1782,10 @@ elif page == "Contract Viewer":
                  color:var(--text-muted);letter-spacing:1.2px;text-transform:uppercase;
                  margin-bottom:10px;">Security & Privacy</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
+            sec_paths = {"Data Residency":"security.dataResidency","Compliance Standard":"security.complianceStandard",
+                "Personal Data Processing":"security.personalDataProcessing","Privacy Requirements":"security.privacyRequirements"}
             for label, val in sec_fields.items():
-                render_summary_row(label, fmt_val(val))
+                render_summary_row(label, fmt_val(val), canon_path=sec_paths.get(label,""))
             st.markdown("</div>", unsafe_allow_html=True)
 
         # ── Project Governance block ──
@@ -1686,8 +1801,11 @@ elif page == "Contract Viewer":
                  color:var(--text-muted);letter-spacing:1.2px;text-transform:uppercase;
                  margin-bottom:10px;">Project Governance</div>""", unsafe_allow_html=True)
             st.markdown('<div class="card" style="margin-bottom:16px;">', unsafe_allow_html=True)
+            pg_paths = {"Project Timeline":"projectGovernance.projectTimeline",
+                "Kickoff Date":"projectGovernance.kickoffDate",
+                "Review Milestones":"projectGovernance.reviewMilestones"}
             for label, val in pg_fields.items():
-                render_summary_row(label, fmt_val(val))
+                render_summary_row(label, fmt_val(val), canon_path=pg_paths.get(label,""))
             st.markdown("</div>", unsafe_allow_html=True)
 
         # Fallback if nothing rendered
@@ -1695,6 +1813,53 @@ elif page == "Contract Viewer":
         if not any(bool(b) for b in all_blocks):
             st.markdown('<div style="color:var(--text-muted);padding:20px 0;font-size:13px">No structured fields extracted. Check the Raw JSON tab.</div>', unsafe_allow_html=True)
 
+        # ── Regenerate bar ───────────────────────────────────────────────
+        edited_count = len(st.session_state.get("summary_edits", {}))
+        if edited_count > 0:
+            st.markdown("<br>", unsafe_allow_html=True)
+            label_s = "s" if edited_count != 1 else ""
+            regen_html = (
+                "<div style='background:rgba(255,230,0,0.05);border:1px solid rgba(255,230,0,0.22);"
+                "border-radius:10px;padding:14px 20px;display:flex;align-items:center;gap:12px;'>"
+                "<span style='font-size:18px;'>✎</span>"
+                "<div>"
+                "<div style='font-family:Syne,sans-serif;font-size:13px;font-weight:700;color:#FFE600;'>"
+                f"{edited_count} field{label_s} edited"
+                "</div>"
+                "<div style='font-size:11px;color:#666;margin-top:2px;'>"
+                "Updated values shown in gold above &middot; Regenerate to apply to your documents"
+                "</div></div></div>"
+            )
+            st.markdown(regen_html, unsafe_allow_html=True)
+            st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
+            col_regen, col_clear = st.columns([5, 1])
+            with col_regen:
+                btn_label = f"⚡ Regenerate Documents  ({edited_count} field{label_s} edited)"
+                if st.button(btn_label, type="primary", use_container_width=True, key="regen_summary"):
+                    overrides = dict(st.session_state.summary_edits)
+                    with st.spinner("Submitting edits and queuing regeneration…"):
+                        try:
+                            r2 = requests.post(
+                                f"{API_URL}/jobs/{job_id}/regenerate",
+                                headers={"X-API-Key": API_KEY},
+                                json={"overrides": overrides},
+                            )
+                            if r2.status_code == 200:
+                                st.session_state.summary_edits   = {}
+                                st.session_state.summary_editing = set()
+                                st.session_state.page = "Job Status"
+                                st.rerun()
+                            elif r2.status_code == 404:
+                                st.error("The /regenerate endpoint is not deployed yet.")
+                            else:
+                                st.error(f"API error {r2.status_code}: {r2.text}")
+                        except Exception as e:
+                            st.error(f"Connection failed: {e}")
+            with col_clear:
+                if st.button("✕ Clear", key="clear_summ", use_container_width=True):
+                    st.session_state.summary_edits   = {}
+                    st.session_state.summary_editing = set()
+                    st.rerun()
     # ── TAB: CONFLICTS ────────────────────────
     with tabs[1]:
         st.markdown("<br>", unsafe_allow_html=True)
