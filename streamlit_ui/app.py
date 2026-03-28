@@ -1795,7 +1795,42 @@ elif page == "Contract Viewer":
         st.stop()
 
     canonical = r.json()
-    tabs = st.tabs(["📋  Summary", "⚡  Conflicts", "🔍  Missing Fields", "{ }  Raw JSON"])
+    _all_conflicts     = canonical.get("conflicts", [])
+    _dismissed_set     = st.session_state.get("conflict_dismissed", set())
+    _remaining_count   = len([c for c in _all_conflicts if c.get("field", "") not in _dismissed_set])
+    _conflict_tab_label = f"⚡  Conflicts  ({_remaining_count})" if _remaining_count else "⚡  Conflicts  ✓"
+    tabs = st.tabs(["📋  Summary", _conflict_tab_label, "🔍  Missing Fields", "{ }  Raw JSON"])
+
+    # ── Restore active tab after rerun ──────────────────────────────────────────
+    # Streamlit always resets to tab 0 on rerun. We work around this by injecting
+    # JS that repeatedly tries to click the correct tab until the DOM is ready.
+    if "active_cv_tab" not in st.session_state:
+        st.session_state.active_cv_tab = 0
+    _active_tab_idx = st.session_state.active_cv_tab
+    if _active_tab_idx > 0:
+        # Place the script inside the iframe via st.components would be ideal,
+        # but unsafe_allow_html scripts DO execute in Streamlit's frontend.
+        # We use a retry loop with increasing delays to handle slow renders.
+        st.markdown(f"""
+        <script>
+        (function() {{
+            var _target = {_active_tab_idx};
+            var _attempts = 0;
+            var _maxAttempts = 30;
+            function _tryClick() {{
+                _attempts++;
+                var btns = window.parent.document.querySelectorAll('button[role="tab"]');
+                if (btns.length > _target) {{
+                    btns[_target].click();
+                }} else if (_attempts < _maxAttempts) {{
+                    setTimeout(_tryClick, 100);
+                }}
+            }}
+            // Small initial delay then retry loop
+            setTimeout(_tryClick, 150);
+        }})();
+        </script>
+        """, unsafe_allow_html=True)
 
     # ── TAB: SUMMARY ──────────────────────────
     with tabs[0]:
@@ -2267,24 +2302,46 @@ elif page == "Contract Viewer":
                 st.session_state.conflict_custom_text = {}
             if "regen_submitted" not in st.session_state:
                 st.session_state.regen_submitted = False
+            if "conflict_dismissed" not in st.session_state:
+                st.session_state.conflict_dismissed = set()
+            if "conflict_pending_confirm" not in st.session_state:
+                st.session_state.conflict_pending_confirm = set()
 
+            dismissed_count  = len(st.session_state.conflict_dismissed)
+            remaining_count  = len(conflicts) - dismissed_count
+            _h_num  = f"{remaining_count} conflict{'s' if remaining_count != 1 else ''} remaining" if remaining_count else "All conflicts resolved"
+            _h_sub  = "Accept the chosen value to dismiss a conflict, or pick an override · then regenerate"
+            _h_icon = "✓" if remaining_count == 0 else "⚡"
+            _h_col  = "var(--green)" if remaining_count == 0 else "#ffffff"
+            _h_bg   = "rgba(0,232,122,0.05)" if remaining_count == 0 else "rgba(255,77,77,0.05)"
+            _h_bdr  = "rgba(0,232,122,0.15)" if remaining_count == 0 else "rgba(255,77,77,0.15)"
             st.markdown(f"""
-            <div class="conflict-count-header">
+            <div class="conflict-count-header" style="background:{_h_bg};border-color:{_h_bdr};">
               <div>
-                <div class="conflict-count-num">{len(conflicts)} conflict{'s' if len(conflicts) != 1 else ''} found</div>
-                <div class="conflict-count-label">Select a value for each conflict you want to override · then regenerate documents below</div>
+                <div class="conflict-count-num" style="color:{_h_col};">{_h_num}</div>
+                <div class="conflict-count-label">{_h_sub}</div>
               </div>
-              <div class="conflict-count-icon">⚡</div>
+              <div class="conflict-count-icon">{_h_icon}</div>
             </div>
             """, unsafe_allow_html=True)
 
             resolved_count = 0
+            _active_conflicts = [c for c in conflicts if c.get("field", "") not in st.session_state.conflict_dismissed]
+            _active_total = len(_active_conflicts)
+            _active_i = 0  # renumbered index among non-dismissed conflicts
 
             for i, conflict in enumerate(conflicts):
                 field   = conflict.get("field", f"Conflict {i+1}")
                 chosen  = conflict.get("chosen", "—")
                 source  = conflict.get("chosenSource", "—")
                 alts    = conflict.get("alternatives", [])
+
+                # ── Skip dismissed (accepted) conflicts ──────────────────
+                if field in st.session_state.conflict_dismissed:
+                    resolved_count += 1   # count it toward regenerate tally
+                    continue
+
+                _active_i += 1  # increment visible conflict number
 
                 def _clean_conflict_val(v):
                     """Flatten list values and strip noise for display."""
@@ -2341,7 +2398,7 @@ elif page == "Contract Viewer":
                         color:var(--gold);
                         letter-spacing:0.6px;
                         text-transform:uppercase;
-                    ">Conflict {i+1} of {len(conflicts)}</div>
+                    ">Conflict {_active_i} of {_active_total}</div>
                     <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--text);">⚡ {field}</div>
                   </div>
                   <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px;">
@@ -2394,10 +2451,69 @@ elif page == "Contract Viewer":
                     else:
                         resolved_count += 1
 
+                # ── Per-card: Accept Chosen Value ────────────────────────
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+                _pending = field in st.session_state.conflict_pending_confirm
+
+                if not _pending:
+                    _btn_col, _ = st.columns([2, 5])
+                    with _btn_col:
+                        if st.button(
+                            "✓  Accept Chosen Value",
+                            key=f"accept_chosen_{i}",
+                            help=f"Keep the already-chosen value for '{field}' and dismiss this conflict",
+                        ):
+                            st.session_state.conflict_pending_confirm.add(field)
+                            st.session_state.active_cv_tab = 1  # stay on Conflicts tab
+                            st.rerun()
+                else:
+                    # Confirmation banner — no regenerate here, just dismiss
+                    st.markdown(f"""
+                    <div style="
+                        background: rgba(0,232,122,0.06);
+                        border: 1px solid rgba(0,232,122,0.25);
+                        border-radius: 8px;
+                        padding: 14px 16px;
+                        margin-bottom: 6px;
+                    ">
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                        <div style="font-size:16px;">✅</div>
+                        <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--green);">
+                            Accept chosen value for <em>{field}</em>?
+                        </div>
+                      </div>
+                      <div style="font-size:12px;color:var(--text-muted);line-height:1.5;padding-left:26px;">
+                          This conflict will be dismissed and the chosen value will be kept.
+                          Click <strong style="color:var(--gold);">Regenerate Documents</strong> at the bottom of the page for this to reflect in your documents.
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    _c_confirm, _c_cancel, _ = st.columns([1.2, 1, 5])
+                    with _c_confirm:
+                        if st.button("✓  Confirm", key=f"confirm_accept_{i}", type="primary"):
+                            st.session_state.conflict_dismissed.add(field)
+                            st.session_state.conflict_pending_confirm.discard(field)
+                            st.session_state.active_cv_tab = 1  # stay on Conflicts tab
+                            st.rerun()
+                    with _c_cancel:
+                        if st.button("✕ Cancel", key=f"cancel_accept_{i}"):
+                            st.session_state.conflict_pending_confirm.discard(field)
+                            st.session_state.active_cv_tab = 1  # stay on Conflicts tab
+                            st.rerun()
+
                 st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
 
-            # ── Scroll nudge — appears once at least 1 conflict is resolved ──
+            # ── Scroll nudge — appears once at least 1 conflict is dismissed/resolved ──
+            _dismissed_c = len(st.session_state.conflict_dismissed)
+            _override_c  = resolved_count - _dismissed_c
             if resolved_count > 0:
+                _nudge_parts = []
+                if _dismissed_c > 0:
+                    _nudge_parts.append(f"{_dismissed_c} accepted")
+                if _override_c > 0:
+                    _nudge_parts.append(f"{_override_c} override{'s' if _override_c != 1 else ''}")
+                _nudge_str = " · ".join(_nudge_parts)
                 st.markdown(f"""
                 <div style="
                     display:flex;
@@ -2413,16 +2529,16 @@ elif page == "Contract Viewer":
                   <div style="font-size:18px;">👇</div>
                   <div>
                     <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:600;color:var(--gold);">
-                        {resolved_count} override{'s' if resolved_count != 1 else ''} ready
+                        {_nudge_str} ready
                     </div>
                     <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                        Scroll down to regenerate your documents with the updated values
+                        Scroll down and click Regenerate Documents for changes to reflect in your documents
                     </div>
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # ── Regenerate button — always visible, but pulsing when resolves > 0 ──
+            # ── Regenerate button — always visible, pulsing when there's something to apply ──
             st.markdown("""
             <div style="
                 border-top:1px solid #222;
@@ -2430,7 +2546,12 @@ elif page == "Contract Viewer":
             "></div>
             """, unsafe_allow_html=True)
 
-            regen_label = f"⚡ Regenerate Documents ({resolved_count} override{'s' if resolved_count != 1 else ''})" if resolved_count > 0 else "⚡ Regenerate Documents"
+            _regen_parts = []
+            if _dismissed_c > 0:
+                _regen_parts.append(f"{_dismissed_c} accepted")
+            if _override_c > 0:
+                _regen_parts.append(f"{_override_c} override{'s' if _override_c != 1 else ''}")
+            regen_label = f"⚡ Regenerate Documents  ({', '.join(_regen_parts)})" if _regen_parts else "⚡ Regenerate Documents"
 
             if resolved_count > 0:
                 st.markdown("""
@@ -2447,49 +2568,56 @@ elif page == "Contract Viewer":
                 """, unsafe_allow_html=True)
 
             if st.button(regen_label, type="primary", use_container_width=True):
-                # Build overrides dict to POST to API
+                # Build overrides dict — skip dismissed (accepted) conflicts
                 overrides = {}
                 for i, conflict in enumerate(conflicts):
                     field        = conflict.get("field", f"Conflict {i+1}")
                     chosen_opt   = st.session_state.conflict_overrides.get(field, "")
                     alts         = conflict.get("alternatives", [])
 
-                    if chosen_opt.startswith("✅ Keep chosen"):
+                    # Dismissed = user accepted the chosen value; no override needed
+                    if field in st.session_state.conflict_dismissed:
+                        continue
+                    if not chosen_opt or chosen_opt.startswith("✅ Keep chosen"):
                         continue  # no override needed
                     elif chosen_opt == "✏️ Enter custom value":
                         custom = st.session_state.conflict_custom_text.get(field, "").strip()
                         if custom:
                             overrides[field] = custom
                     else:
-                        # Use stored label→value map — avoids mismatch when
-                        # the full value was truncated in the radio label
                         field_map = st.session_state.get("conflict_label_values", {}).get(field, {})
                         if chosen_opt in field_map:
                             overrides[field] = field_map[chosen_opt]
                         else:
-                            # Fallback for short values that fit untruncated
                             for a in alts:
                                 raw = str(a.get("value", ""))
                                 if raw[:80] in chosen_opt or raw in chosen_opt:
                                     overrides[field] = raw
                                     break
 
-                if not overrides:
-                    st.warning("No overrides selected — please choose an alternative or custom value for at least one conflict.")
+                # Accepted conflicts count as resolved even with no payload override
+                _has_work = overrides or st.session_state.conflict_dismissed
+                if not _has_work:
+                    st.warning("Accept or override at least one conflict before regenerating.")
                 else:
                     with st.spinner("Submitting overrides and queuing regeneration…"):
                         try:
                             r = requests.post(
                                 f"{API_URL}/jobs/{job_id}/regenerate",
                                 headers={"X-API-Key": API_KEY},
-                                json={"overrides": overrides},
+                                json={
+                                    "overrides": overrides,
+                                    "dismissed_fields": list(st.session_state.conflict_dismissed),
+                                },
                             )
                             if r.status_code == 200:
                                 new_job_id = r.json().get("job_id", job_id)
                                 st.session_state.job_id = new_job_id
-                                # Clear override state for fresh run
+                                # Clear all conflict state for fresh run
                                 st.session_state.conflict_overrides = {}
                                 st.session_state.conflict_custom_text = {}
+                                st.session_state.conflict_dismissed = set()
+                                st.session_state.conflict_pending_confirm = set()
                                 st.session_state.page = "Job Status"
                                 st.rerun()
                             elif r.status_code == 404:
