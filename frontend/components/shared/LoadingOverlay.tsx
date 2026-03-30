@@ -1,0 +1,1 @@
+export function LoadingOverlay({ label = 'Loading…' }: { label?: string }) { return <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-zinc-200 bg-white"><div className="text-sm text-zinc-500">{label}</div></div>; }

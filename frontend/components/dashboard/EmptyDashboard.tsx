@@ -1,0 +1,2 @@
+import { Inbox } from 'lucide-react';
+export function EmptyDashboard() { return <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-10 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-100 text-zinc-900"><Inbox className="h-5 w-5" /></div><p className="mt-4 text-base font-semibold text-zinc-900">No jobs have been created yet</p><p className="mt-1 text-sm text-zinc-500">Upload a document from the home screen to begin.</p></div>; }

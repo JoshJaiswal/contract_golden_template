@@ -1,0 +1,7 @@
+import Link from 'next/link';
+import { ArrowRight, FileText } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardBody } from '@/components/ui/card';
+import { formatContractType, formatDateTime } from '@/lib/format';
+import type { JobRecord } from '@/lib/api/types';
+export function JobRow({ job }: { job: JobRecord }) { return <Card><CardBody className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="flex min-w-0 items-start gap-3"><div className="rounded-xl bg-zinc-100 p-2 text-zinc-700"><FileText className="h-4 w-4" /></div><div className="min-w-0"><h3 className="truncate font-medium text-zinc-900">{job.file_name}</h3><p className="mt-1 text-sm text-zinc-500">{job.job_id}</p><div className="mt-2 flex flex-wrap gap-2"><Badge tone={job.status === 'complete' ? 'success' : job.status === 'failed' ? 'danger' : job.status === 'processing' ? 'warning' : 'neutral'}>{job.status}</Badge><Badge tone="neutral">{formatContractType(job.contract_type)}</Badge></div></div></div><div className="grid gap-1 text-sm text-zinc-600 md:text-right"><div>{formatDateTime(job.created_at)}</div>{job.error ? <div className="text-red-600">{job.error}</div> : null}</div><Link href={`/jobs/${job.job_id}`} className="inline-flex items-center gap-2 self-start rounded-xl bg-yellow-300 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-yellow-400 md:self-auto"><span>View</span><ArrowRight className="h-4 w-4" /></Link></CardBody></Card>; }

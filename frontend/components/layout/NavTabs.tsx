@@ -1,0 +1,3 @@
+import Link from 'next/link';
+import { cn } from '@/lib/utils';
+export function NavTabs({ current }: { current: 'home' | 'jobs' }) { return <div className="mb-6 flex gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-2"><Link href="/" className={cn('flex-1 rounded-xl px-4 py-3 text-center text-sm font-semibold transition', current === 'home' ? 'bg-yellow-300 text-zinc-900' : 'text-zinc-600 hover:bg-white hover:text-zinc-900')}>Upload</Link><Link href="/jobs" className={cn('flex-1 rounded-xl px-4 py-3 text-center text-sm font-semibold transition', current === 'jobs' ? 'bg-yellow-300 text-zinc-900' : 'text-zinc-600 hover:bg-white hover:text-zinc-900')}>Jobs</Link></div>; }

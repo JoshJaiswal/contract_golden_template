@@ -1,0 +1,4 @@
+import { AlertTriangle, RefreshCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardBody } from '@/components/ui/card';
+export function ErrorState({ title = 'Something went wrong', message, onRetry }: { title?: string; message: string; onRetry?: () => void }) { return <Card><CardBody><div className="flex items-start gap-3"><div className="mt-1 rounded-xl bg-red-50 p-2 text-red-700"><AlertTriangle className="h-4 w-4" /></div><div className="min-w-0 flex-1"><h3 className="text-base font-semibold text-zinc-900">{title}</h3><p className="mt-1 text-sm text-zinc-600">{message}</p>{onRetry ? <Button className="mt-4" onClick={onRetry}><RefreshCcw className="h-4 w-4" />Retry</Button> : null}</div></div></CardBody></Card>; }

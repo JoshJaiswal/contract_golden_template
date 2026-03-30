@@ -1,0 +1,3 @@
+import { Info } from 'lucide-react';
+import { Card, CardBody } from '@/components/ui/card';
+export function UploadHelp() { return <Card className="border-dashed"><CardBody><div className="flex gap-3"><div className="mt-0.5 rounded-xl bg-yellow-100 p-2 text-zinc-900"><Info className="h-4 w-4" /></div><div className="text-sm text-zinc-600"><p className="font-medium text-zinc-900">Supported files</p><p className="mt-1">PDF, DOCX, DOC, EML, MP3, WAV, M4A. Upload one contract at a time for analysis.</p></div></div></CardBody></Card>; }

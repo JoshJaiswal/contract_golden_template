@@ -1,0 +1,3 @@
+import { CONTRACT_TYPE_OPTIONS } from '@/lib/constants';
+import { Select } from '@/components/ui/select';
+export function ContractTypeSelect({ value, onChange }: { value: string; onChange: (value: any) => void }) { return <div><label className="mb-2 block text-sm font-medium text-zinc-700">Contract type</label><Select value={value} onChange={(e) => onChange(e.target.value)}>{CONTRACT_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></div>; }

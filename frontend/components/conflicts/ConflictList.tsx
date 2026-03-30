@@ -1,0 +1,2 @@
+import { ConflictCard } from './ConflictCard';
+export function ConflictList({ conflicts }: { conflicts: { field: string; label: string; current: string; proposed: string; note?: string }[] }) { if (!conflicts.length) return <div className="rounded-2xl border border-dashed border-zinc-200 p-6 text-sm text-zinc-500">No conflicts detected.</div>; return <div className="space-y-3">{conflicts.map((c) => <ConflictCard key={c.field} {...c} />)}</div>; }

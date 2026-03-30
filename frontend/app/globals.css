@@ -1,0 +1,3 @@
+@tailwind base;@tailwind components;@tailwind utilities;
+:root{--ey-yellow:#FFE600;--ey-black:#111111;--ey-ink:#1C1C1C;--ey-muted:#6B7280;--ey-border:#E5E7EB;--ey-surface:#FAFAFA;--ey-surface-2:#F4F4F5;--ey-success:#0F766E;--ey-danger:#B91C1C;--ey-warning:#B45309}
+html{scroll-behavior:smooth}body{margin:0;color:var(--ey-ink);background:#fff;font-family:var(--font-dm-sans),system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}*{box-sizing:border-box}a{color:inherit;text-decoration:none}::selection{background:rgba(255,230,0,.35)}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:9999px}::-webkit-scrollbar-track{background:transparent}

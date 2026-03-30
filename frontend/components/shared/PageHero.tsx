@@ -1,0 +1,3 @@
+import type { ReactNode } from 'react';
+import { Card, CardBody } from '@/components/ui/card';
+export function PageHero({ eyebrow, title, subtitle, right }: { eyebrow: string; title: string; subtitle: string; right?: ReactNode }) { return <Card className="overflow-hidden"><CardBody className="flex flex-col gap-4 border-l-4 border-l-yellow-400 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-mono uppercase tracking-[0.24em] text-yellow-700">{eyebrow}</p><h1 className="mt-2 font-[family-name:var(--font-syne)] text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">{subtitle}</p></div>{right ? <div>{right}</div> : null}</CardBody></Card>; }
