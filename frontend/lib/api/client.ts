@@ -1,4 +1,4 @@
-import { API_BASE_PATH, API_KEY } from '@/lib/constants';
+import { API_BASE_PATH, API_KEY } from '@/lib/env';
 
 export class APIError extends Error {
   status: number;

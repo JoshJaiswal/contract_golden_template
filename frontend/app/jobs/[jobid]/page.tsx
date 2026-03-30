@@ -10,15 +10,21 @@ import { PageHero } from '@/components/shared/PageHero';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { LoadingOverlay } from '@/components/shared/LoadingOverlay';
 import { ContractViewer } from '@/components/viewer/ContractViewer';
-import { fetchCanonical, getJob } from '@/lib/api/jobs';
+
+import { fetchCanonicalBlob, getJob } from '@/lib/api/jobs';
 import { APIError } from '@/lib/api/client';
 import type { CanonicalDocument, JobRecord } from '@/lib/api/types';
+
 import { useAppStore } from '@/store/useAppStore';
 import { useJobPolling } from '@/hooks/useJobPolling';
 
 export default function JobPage({ params }: { params: { jobId: string } }) {
   const router = useRouter();
+
+  // ✅ Source of truth comes from URL params
   const { jobId } = params;
+
+  // Store is only for UI state sync
   const setJobId = useAppStore((s) => s.setJobId);
   const resetEdits = useAppStore((s) => s.resetEdits);
 
@@ -27,11 +33,13 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Keep store synced with URL jobId
   useEffect(() => {
     setJobId(jobId);
     resetEdits();
   }, [jobId, resetEdits, setJobId]);
 
+  // ✅ Initial load
   useEffect(() => {
     let mounted = true;
 
@@ -42,11 +50,12 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
       try {
         const result = await getJob(jobId);
         if (!mounted) return;
+
         setJob(result);
 
         if (result.status === 'complete') {
           try {
-            const c = await fetchCanonical(jobId);
+            const c = await fetchCanonicalBlob(jobId);
             if (mounted) setCanonical(c);
           } catch {
             if (mounted) setCanonical(null);
@@ -54,11 +63,13 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
         }
       } catch (err) {
         if (!mounted) return;
+
         if (err instanceof APIError && err.status === 404) {
           toast.error('Job not found or expired. Please re-upload the file.');
           router.replace('/jobs');
           return;
         }
+
         setError(err instanceof Error ? err.message : 'Unable to load job');
       } finally {
         if (mounted) setLoading(false);
@@ -71,18 +82,22 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
     };
   }, [jobId, router]);
 
-  const handlePollingUpdate = useCallback(async (updated: JobRecord) => {
-    setJob(updated);
+  // ✅ Polling updates
+  const handlePollingUpdate = useCallback(
+    async (updated: JobRecord) => {
+      setJob(updated);
 
-    if (updated.status === 'complete') {
-      try {
-        const c = await fetchCanonical(jobId);
-        setCanonical(c);
-      } catch {
-        setCanonical(null);
+      if (updated.status === 'complete') {
+        try {
+          const c = await fetchCanonicalBlob(jobId);
+          setCanonical(c);
+        } catch {
+          setCanonical(null);
+        }
       }
-    }
-  }, [jobId]);
+    },
+    [jobId]
+  );
 
   const handleNotFound = useCallback(() => {
     toast.error('Job not found or expired. Please re-upload the file.');
@@ -99,12 +114,14 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
     onError: handlePollingError,
   });
 
+  // ✅ Manual refresh
   const refreshJob = useCallback(async () => {
     const fresh = await getJob(jobId);
     setJob(fresh);
+
     if (fresh.status === 'complete') {
       try {
-        const c = await fetchCanonical(jobId);
+        const c = await fetchCanonicalBlob(jobId);
         setCanonical(c);
       } catch {
         setCanonical(null);
@@ -112,16 +129,28 @@ export default function JobPage({ params }: { params: { jobId: string } }) {
     }
   }, [jobId]);
 
+  // ✅ View builder
   const workspace = useMemo(() => {
     if (loading) {
       return <LoadingOverlay label="Loading job workspace…" />;
     }
 
     if (error || !job) {
-      return <ErrorState message={error || 'Job unavailable'} onRetry={() => router.refresh()} />;
+      return (
+        <ErrorState
+          message={error || 'Job unavailable'}
+          onRetry={() => router.refresh()}
+        />
+      );
     }
 
-    return <ContractViewer job={job} canonical={canonical} onRefresh={refreshJob} />;
+    return (
+      <ContractViewer
+        job={job}
+        canonical={canonical}
+        onRefresh={refreshJob}
+      />
+    );
   }, [canonical, error, job, loading, refreshJob, router]);
 
   return (

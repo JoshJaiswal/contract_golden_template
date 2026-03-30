@@ -1,8 +1,25 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
-    const backend = process.env.BACKEND_ORIGIN || 'http://localhost:8000';
-    return [{ source: '/api/backend/:path*', destination: `${backend}/:path*` }];
+    return [
+      {
+        source: '/analyze',
+        destination: 'http://localhost:8000/analyze',
+      },
+      {
+        source: '/api/jobs/:path*',
+        destination: 'http://localhost:8000/jobs/:path*',
+      },
+      {
+        source: '/api/download/:path*',
+        destination: 'http://localhost:8000/download/:path*',
+      },
+      {
+        source: '/api/health',
+        destination: 'http://localhost:8000/health',
+      },
+    ];
   },
 };
+
 module.exports = nextConfig;

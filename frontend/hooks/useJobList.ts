@@ -1,12 +1,13 @@
-import {useEffect, useState } from 'react'
-import { getJob } from '@/lib/api/jobs'
+import { useEffect, useState } from 'react'
+import { listJobs } from '@/lib/api/jobs'
+import type { JobRecord } from '@/lib/api/types'
 
 export const useJobList = () => {
-    const [jobs, setJobs] = useState([])
+    const [jobs, setJobs] = useState<JobRecord[]>([]);
 
     useEffect(() => {
-        getJobs().then(setJobs)
-    }, [])
+        listJobs().then(data => setJobs(data.jobs));
+    }, []);
 
-    return { jobs }
-}
+    return { jobs };
+};

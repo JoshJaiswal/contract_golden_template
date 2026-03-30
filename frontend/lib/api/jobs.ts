@@ -10,7 +10,7 @@ import type {
 import { requestBlob, requestJson, triggerDownload } from './client';
 
 /* ------------------------- ANALYZE CONTRACT ------------------------- */
-
+/* stays as-is, no /api/ prefix */
 export function analyzeContract(file: File, contractType: ContractType) {
   const form = new FormData();
   form.append('file', file);
@@ -25,15 +25,15 @@ export function analyzeContract(file: File, contractType: ContractType) {
 /* ---------------------------- JOB QUERIES ---------------------------- */
 
 export function getJob(jobId: string) {
-  return requestJson<JobRecord>(`/jobs/${jobId}`);
+  return requestJson<JobRecord>(`/api/jobs/${jobId}`);
 }
 
 export function listJobs() {
-  return requestJson<JobsListResponse>('/jobs');
+  return requestJson<JobsListResponse>('/api/jobs');
 }
 
 export function regenerateJob(jobId: string, payload: RegenerateRequest) {
-  return requestJson<AnalyzeResponse>(`/jobs/${jobId}/regenerate`, {
+  return requestJson<AnalyzeResponse>(`/api/jobs/${jobId}/regenerate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -43,19 +43,19 @@ export function regenerateJob(jobId: string, payload: RegenerateRequest) {
 /* --------------------------- FILE DOWNLOADS --------------------------- */
 
 export function fetchSourceBlob(jobId: string) {
-  return requestBlob(`/download/${jobId}/source`);
+  return requestBlob(`/api/download/${jobId}/source`);
 }
 
 export function fetchCanonicalBlob(jobId: string) {
-  return requestBlob(`/download/${jobId}/canonical`);
+  return requestBlob(`/api/download/${jobId}/canonical`);
 }
 
 export function fetchNdaBlob(jobId: string) {
-  return requestBlob(`/download/${jobId}/nda`);
+  return requestBlob(`/api/download/${jobId}/nda`);
 }
 
 export function fetchSowBlob(jobId: string) {
-  return requestBlob(`/download/${jobId}/sow`);
+  return requestBlob(`/api/download/${jobId}/sow`);
 }
 
 /* --------------------------- ARTIFACT DOWNLOAD ------------------------- */
