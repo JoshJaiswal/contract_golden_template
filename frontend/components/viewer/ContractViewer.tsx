@@ -25,10 +25,52 @@ import {
   extractConflicts,
   extractMissingFields,
   extractSummarySections,
+  cnKeyToLabel, // ✅ used to build a human label for conflicts
 } from '@/lib/format';
 
 import { useRegenerateJob } from '@/hooks/useRegenerateJob';
 import type { JobRecord } from '@/lib/api/types';
+
+// ✅ Subscribe to the edit state so UI reacts to "Save value" / "Dismiss"
+import { useAppStore } from '@/store/useAppStore';
+
+// ---------- helpers to apply overrides by dot-path ----------
+function setByPath<T extends Record<string, any>>(obj: T, path: string, value: any): T {
+  const clone: any = Array.isArray(obj) ? [...obj] : { ...obj };
+  const parts = path.split('.');
+  let cur = clone;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const p = parts[i];
+    if (cur[p] == null || typeof cur[p] !== 'object') {
+      cur[p] = {};
+    }
+    cur = cur[p];
+  }
+
+  cur[parts[parts.length - 1]] = value;
+  return clone;
+}
+
+function applyOverrides<T extends Record<string, any>>(canonical: T | null, overrides: Record<string, string>): T | null {
+  if (!canonical) return canonical as any;
+  let out: any =
+    typeof structuredClone === 'function'
+      ? structuredClone(canonical)
+      : JSON.parse(JSON.stringify(canonical));
+
+  for (const [path, val] of Object.entries(overrides)) {
+    out = setByPath(out, path, val);
+  }
+  return out;
+}
+
+function stringifyVal(v: unknown): string {
+  if (Array.isArray(v)) return v.join(', ');
+  if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+  return String(v ?? '');
+}
+// ---------- end helpers ----------
 
 export function ContractViewer({
   job,
@@ -40,23 +82,86 @@ export function ContractViewer({
   onRefresh: () => Promise<void>;
 }) {
   const [tab, setTab] = useState('overview');
-
   const { run, loading } = useRegenerateJob(job.job_id);
 
+  // ✅ Pull live state so this component re-renders after Save/Dismiss
+  const overrides = useAppStore((s) => s.overrides);
+  const dismissedFields = useAppStore((s) => s.dismissedFields);
+
+  // ✅ Merge overrides so Summary/JSON reflect edits immediately
+  const effectiveCanonical = useMemo(
+    () => applyOverrides(canonical, overrides),
+    [canonical, overrides]
+  );
+
+  // ✅ Build view models from the effective canonical
   const summarySections = useMemo(
-    () => extractSummarySections(canonical),
+    () => extractSummarySections(effectiveCanonical),
+    [effectiveCanonical]
+  );
+
+  // ---- Conflicts: adapt to ConflictList's expected type ----
+  const rawConflicts = useMemo(
+    () => extractConflicts(effectiveCanonical),
+    [effectiveCanonical]
+  );
+
+  // ConflictList expects: { field, label, current, proposed, note? }[]
+  const conflictsForList = useMemo(() => {
+    return rawConflicts.map((c) => {
+      const proposedFirst = c.alternatives?.[0];
+      const proposedValue =
+        proposedFirst?.value != null ? stringifyVal(proposedFirst.value) : c.chosen;
+
+      const altNote =
+        c.alternatives && c.alternatives.length
+          ? `Alternatives: ${c.alternatives
+              .map((a) => `${stringifyVal(a.value)} (source: ${a.source || 'n/a'})`)
+              .join(' | ')}`
+          : 'No alternatives';
+
+      return {
+        field: c.field,
+        label: cnKeyToLabel(c.field),
+        current: stringifyVal(c.chosen),
+        proposed: proposedValue,
+        note: `Chosen source: ${c.chosenSource || 'n/a'}. ${altNote}`,
+      };
+    });
+  }, [rawConflicts]);
+
+  // ---- Missing fields: start from original, then hide overridden/dismissed ----
+  const rawMissing = useMemo(
+    () => extractMissingFields(canonical),
     [canonical]
   );
-  const conflicts = useMemo(() => extractConflicts(canonical), [canonical]);
-  const missing = useMemo(() => extractMissingFields(canonical), [canonical]);
+
+  // ✅ Hide items that are overridden or dismissed
+  const missing = useMemo(() => {
+    const filtered = rawMissing
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((it: any) => {
+          const fieldPath = (it.full ?? it.field) as string | undefined;
+          if (!fieldPath) return true; // if we don't know the path, keep it
+          const hasOverride = Boolean(overrides[fieldPath]);
+          const isDismissed = dismissedFields.includes(fieldPath);
+          return !hasOverride && !isDismissed;
+        }),
+      }))
+      .filter((g) => g.items.length > 0);
+
+    return filtered;
+  }, [rawMissing, overrides, dismissedFields]);
 
   const counts = [
     { value: 'overview', label: 'Overview' },
     { value: 'summary', label: 'Summary', count: summarySections.length },
-    { value: 'conflicts', label: 'Conflicts', count: conflicts.length },
+    { value: 'conflicts', label: 'Conflicts', count: conflictsForList.length }, // ✅ using adapted list
     {
       value: 'missing',
       label: 'Missing Fields',
+      // ✅ count after filtering
       count: missing.reduce((sum, g) => sum + g.items.length, 0),
     },
     { value: 'source', label: 'Source' },
@@ -70,9 +175,7 @@ export function ContractViewer({
       toast.success('Regeneration queued');
       await onRefresh();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : 'Regeneration failed'
-      );
+      toast.error(err instanceof Error ? err.message : 'Regeneration failed');
     }
   };
 
@@ -117,11 +220,7 @@ export function ContractViewer({
               </div>
             </div>
 
-            <JobActions
-              jobId={job.job_id}
-              onRegenerate={handleRegenerate}
-              regenLoading={loading}
-            />
+            <JobActions jobId={job.job_id} onRegenerate={handleRegenerate} regenLoading={loading} />
           </div>
 
           <JobProgress status={job.status} />
@@ -136,13 +235,10 @@ export function ContractViewer({
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardBody>
-              <h2 className="mb-3 text-lg font-semibold text-zinc-900">
-                Overview
-              </h2>
+              <h2 className="mb-3 text-lg font-semibold text-zinc-900">Overview</h2>
 
               <p className="text-sm text-zinc-600">
-                Use the tabs to inspect the summary, resolve conflicts,
-                fill missing fields, and generate NDA/SOW outputs.
+                Use the tabs to inspect the summary, resolve conflicts, fill missing fields, and generate NDA/SOW outputs.
               </p>
 
               <div className="mt-4 space-y-2 text-sm text-zinc-700">
@@ -153,12 +249,10 @@ export function ContractViewer({
                   <span className="font-medium">File:</span> {job.file_name}
                 </p>
                 <p>
-                  <span className="font-medium">Type:</span>{' '}
-                  {formatContractType(job.contract_type)}
+                  <span className="font-medium">Type:</span> {formatContractType(job.contract_type)}
                 </p>
                 <p>
-                  <span className="font-medium">Created:</span>{' '}
-                  {formatDateTime(job.created_at)}
+                  <span className="font-medium">Created:</span> {formatDateTime(job.created_at)}
                 </p>
               </div>
             </CardBody>
@@ -166,9 +260,7 @@ export function ContractViewer({
 
           <Card>
             <CardBody>
-              <h2 className="mb-3 text-lg font-semibold text-zinc-900">
-                Source preview
-              </h2>
+              <h2 className="mb-3 text-lg font-semibold text-zinc-900">Source preview</h2>
               <PreviewPane jobId={job.job_id} fileName={job.file_name} />
             </CardBody>
           </Card>
@@ -180,19 +272,14 @@ export function ContractViewer({
         <Card>
           <CardBody>
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-zinc-900">
-                Summary
-              </h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Summary</h2>
 
-              <Button
-                variant="primary"
-                onClick={() => void handleRegenerate()}
-                disabled={loading}
-              >
+              <Button variant="primary" onClick={() => void handleRegenerate()} disabled={loading}>
                 Regenerate
               </Button>
             </div>
 
+            {/* ✅ Use effective canonical so summary reflects saved values */}
             <SummarySection sections={summarySections} />
           </CardBody>
         </Card>
@@ -203,20 +290,15 @@ export function ContractViewer({
         <Card>
           <CardBody>
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-zinc-900">
-                Conflicts
-              </h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Conflicts</h2>
 
-              <Button
-                variant="primary"
-                onClick={() => void handleRegenerate()}
-                disabled={loading}
-              >
+              <Button variant="primary" onClick={() => void handleRegenerate()} disabled={loading}>
                 Regenerate
               </Button>
             </div>
 
-            <ConflictList conflicts={conflicts} />
+            {/* ✅ Adapted list to match ConflictList prop type */}
+            <ConflictList conflicts={conflictsForList} />
           </CardBody>
         </Card>
       )}
@@ -226,19 +308,14 @@ export function ContractViewer({
         <Card>
           <CardBody>
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-zinc-900">
-                Missing fields
-              </h2>
+              <h2 className="text-lg font-semibold text-zinc-900">Missing fields</h2>
 
-              <Button
-                variant="primary"
-                onClick={() => void handleRegenerate()}
-                disabled={loading}
-              >
+              <Button variant="primary" onClick={() => void handleRegenerate()} disabled={loading}>
                 Regenerate
               </Button>
             </div>
 
+            {/* ✅ Pass filtered groups so saved/dismissed items disappear */}
             <MissingFieldTree groups={missing} />
           </CardBody>
         </Card>
@@ -248,29 +325,24 @@ export function ContractViewer({
       {tab === 'source' && (
         <Card>
           <CardBody>
-            <h2 className="mb-4 text-lg font-semibold text-zinc-900">
-              Source preview
-            </h2>
-
+            <h2 className="mb-4 text-lg font-semibold text-zinc-900">Source preview</h2>
             <PreviewPane jobId={job.job_id} fileName={job.file_name} />
           </CardBody>
         </Card>
       )}
 
       {/* JSON TAB */}
-      {tab === 'json' && <JsonViewer value={canonical ?? {}} />}
+      {/* ✅ Show effective canonical (with overrides applied) */}
+      {tab === 'json' && <JsonViewer value={effectiveCanonical ?? {}} />}
 
       {/* DOWNLOADS TAB */}
       {tab === 'downloads' && (
         <Card>
           <CardBody className="space-y-4">
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Downloads
-            </h2>
+            <h2 className="text-lg font-semibold text-zinc-900">Downloads</h2>
 
             <p className="text-sm text-zinc-600">
-              Download the generated NDA, SOW, source file or canonical JSON as
-              needed.
+              Download the generated NDA, SOW, source file or canonical JSON as needed.
             </p>
 
             <div className="flex flex-wrap gap-3">
@@ -286,9 +358,7 @@ export function ContractViewer({
                       )
                     )
                     .catch((e) =>
-                      toast.error(
-                        e instanceof Error ? e.message : 'Download failed'
-                      )
+                      toast.error(e instanceof Error ? e.message : 'Download failed')
                     )
                 }
               >
@@ -307,9 +377,7 @@ export function ContractViewer({
                       )
                     )
                     .catch((e) =>
-                      toast.error(
-                        e instanceof Error ? e.message : 'Download failed'
-                      )
+                      toast.error(e instanceof Error ? e.message : 'Download failed')
                     )
                 }
               >
@@ -320,13 +388,9 @@ export function ContractViewer({
                 variant="secondary"
                 onClick={() =>
                   import('@/lib/api/jobs')
-                    .then((m) =>
-                      m.downloadArtifact(job.job_id, 'source', job.file_name)
-                    )
+                    .then((m) => m.downloadArtifact(job.job_id, 'source', job.file_name))
                     .catch((e) =>
-                      toast.error(
-                        e instanceof Error ? e.message : 'Download failed'
-                      )
+                      toast.error(e instanceof Error ? e.message : 'Download failed')
                     )
                 }
               >
@@ -338,16 +402,10 @@ export function ContractViewer({
                 onClick={() =>
                   import('@/lib/api/jobs')
                     .then((m) =>
-                      m.downloadArtifact(
-                        job.job_id,
-                        'canonical',
-                        `${job.job_id}-canonical.json`
-                      )
+                      m.downloadArtifact(job.job_id, 'canonical', `${job.job_id}-canonical.json`)
                     )
                     .catch((e) =>
-                      toast.error(
-                        e instanceof Error ? e.message : 'Download failed'
-                      )
+                      toast.error(e instanceof Error ? e.message : 'Download failed')
                     )
                 }
               >
