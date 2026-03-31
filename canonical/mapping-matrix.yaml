@@ -546,3 +546,183 @@ mappings:
     sourceField: _transcript
     transform: as_is
     precedence: 1
+
+  - canonicalPath: commercials.totalValue
+    sourceAnalyzer: llm_audio
+    sourceField: dealValue
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: commercials.currency
+    sourceAnalyzer: llm_audio
+    sourceField: currency
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: commercials.pricingModel
+    sourceAnalyzer: llm_audio
+    sourceField: pricingModel
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: commercials.taxes
+    sourceAnalyzer: llm_audio
+    sourceField: taxes
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: confidentiality.obligations
+    sourceAnalyzer: llm_audio
+    sourceField: obligations
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: confidentiality.exceptions
+    sourceAnalyzer: llm_audio
+    sourceField: exceptions
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: scope.outOfScope
+    sourceAnalyzer: llm_audio
+    sourceField: outOfScopeItems
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: scope.milestones
+    sourceAnalyzer: llm_audio
+    sourceField: milestones
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: security.requirements
+    sourceAnalyzer: llm_audio
+    sourceField: securityRequirements
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: security.dataResidency
+    sourceAnalyzer: llm_audio
+    sourceField: dataResidency
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: security.complianceStandards
+    sourceAnalyzer: llm_audio
+    sourceField: complianceStandards
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: security.personalDataProcessing
+    sourceAnalyzer: llm_audio
+    sourceField: personalDataProcessing
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: security.privacyRequirements
+    sourceAnalyzer: llm_audio
+    sourceField: privacyRequirements
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.jurisdiction
+    sourceAnalyzer: llm_audio
+    sourceField: jurisdiction
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.disputeResolution
+    sourceAnalyzer: llm_audio
+    sourceField: disputeResolution
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.liabilityCap
+    sourceAnalyzer: llm_audio
+    sourceField: liabilityCap
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.ipOwnership
+    sourceAnalyzer: llm_audio
+    sourceField: ipOwnership
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.warranties
+    sourceAnalyzer: llm_audio
+    sourceField: warranties
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.indemnities
+    sourceAnalyzer: llm_audio
+    sourceField: indemnities
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.terminationForConvenience
+    sourceAnalyzer: llm_audio
+    sourceField: terminationForConvenience
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: legal.terminationForCause
+    sourceAnalyzer: llm_audio
+    sourceField: terminationForCause
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.projectTimeline
+    sourceAnalyzer: llm_audio
+    sourceField: projectTimeline
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.keyPersonnel
+    sourceAnalyzer: llm_audio
+    sourceField: keyPersonnel
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.acceptanceCriteria
+    sourceAnalyzer: llm_audio
+    sourceField: acceptanceCriteria
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.changeControl
+    sourceAnalyzer: llm_audio
+    sourceField: changeControl
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.governanceModel
+    sourceAnalyzer: llm_audio
+    sourceField: governanceModel
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.issueEscalation
+    sourceAnalyzer: llm_audio
+    sourceField: issueEscalation
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: scope.assumptions
+    sourceAnalyzer: llm_audio
+    sourceField: assumptions
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.dependencies
+    sourceAnalyzer: llm_audio
+    sourceField: dependencies
+    transform: as_is
+    precedence: 2
+
+  - canonicalPath: projectGovernance.constraints
+    sourceAnalyzer: llm_audio
+    sourceField: constraints
+    transform: as_is
+    precedence: 2
