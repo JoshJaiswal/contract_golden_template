@@ -6,7 +6,7 @@ Handles audio inputs (.mp3, .wav, .m4a) by:
   2. Transcribing via Azure Speech Services
      - Real-time SDK  → files under ~5 MB (short calls) or when batch is disabled
      - Batch REST API → long recordings / compressed formats when available
-  3. Sending transcript to GPT-4o-mini for contract field extraction
+  3. Sending transcript to GPT-4o for contract field extraction
   4. Returning a canonical-shaped extraction result
 
 Notes you should know:
@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import time
+import re
 import threading
 from pathlib import Path
 from typing import Literal
@@ -86,7 +87,7 @@ def handle_audio(
             "Check the audio file has speech and Speech Services is provisioned."
         )
 
-    # ── Step 3: Extract contract fields via GPT-4o-mini ───────────────────────
+    # ── Step 3: Extract contract fields via GPT-4o ───────────────────────
     extracted = _extract_from_transcript(transcript, contract_type)
     extracted["_source"] = "llm_audio"
     extracted["_originalPath"] = file_path
@@ -358,7 +359,7 @@ def _get_speech_rest_credentials() -> tuple[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GPT-4o-mini extraction — chunked + aggregated
+# GPT-4o extraction — chunked + aggregated
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CHUNK_CHARS = 6000      # ~1500 tokens per chunk, well within context

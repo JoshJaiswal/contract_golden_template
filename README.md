@@ -2,21 +2,17 @@
 
 ![CI](https://github.com/JoshJaiswal/contract_golden_template/actions/workflows/tests.yml/badge.svg)
 
-A production-grade pipeline that transforms unstructured contract documents — PDFs, Word docs, emails, and audio recordings — into standardised NDA and SOW PDFs using Azure AI services.
+A production-grade pipeline that transforms unstructured contract documents — PDFs, Word docs, emails, and audio recordings — into standardised NDA and SOW PDFs using Azure AI services, with a full Next.js frontend workspace.
 
----
-
-## What it does
-
-```
+What it does
 Input (PDF / DOCX / EML / MP3 / WAV / M4A)
           ↓
 Normalization layer
 (pdf_handler / docx_handler / email_handler / audio_handler)
           ↓
-Per‑modality extraction
-  • PDF/DOCX → Azure Content Understanding (3 analyzers)
-  • Audio → Speech (SDK or Batch) → LLM extractor (llm_audio)
+Per-modality extraction
+  • PDF/DOCX/EML → Azure Content Understanding (3 analyzers)
+  • Audio → Azure Speech (SDK or Batch) → GPT-4o LLM extractor (chunked)
           ↓
 Mapping matrix → canonical fields
 (canonical/mapping-matrix.yaml)
@@ -29,76 +25,83 @@ Canonical JSON (single source of truth)
 PDF Generator → NDA / SOW auto-render
 (generation/generate_contract_pdf.py)
           ↓
-One‑shot orchestrators
-  • run_pipeline.py (PDF/DOCX/EML)
-  • run_audio_pipeline.py (Audio E2E)
-          ↓
-FastAPI (optional) – async jobs, file upload/download
+FastAPI → async jobs, file upload/download
 (api.py)
-```
-
----
-
-## Architecture
-
-### Normalisation layer (`normalization/`)
-
+          ↓
+Next.js Frontend → contract workspace, conflict resolution, downloads
+(frontend/)
+Architecture
+Normalisation layer (normalization/)
 Each handler converts a raw input file into a list of extraction dicts. All handlers produce the same shape so the rest of the pipeline is modality-agnostic.
 
-| Handler | Input | Method |
-|---|---|---|
-| `pdf_handler.py` | `.pdf` | Azure Content Understanding |
-| `docx_handler.py` | `.docx` `.doc` | Azure Content Understanding |
-| `email_handler.py` | `.eml` | Azure Content Understanding / text |
-| `audio_handler.py` | `.mp3` `.wav` `.m4a` | Azure Speech → GPT-4o-mini |
+Handler	Input	Method
+pdf_handler.py	.pdf	Azure Content Understanding
+docx_handler.py	.docx .doc	Azure Content Understanding
+email_handler.py	.eml	Azure Content Understanding / text
+audio_handler.py	.mp3 .wav .m4a	Azure Speech → GPT-4o (chunked)
+The router (normalization/__init__.py) dispatches by file extension. run_pipeline.py calls normalize(file_path) and never needs to know the modality.
 
-The router (`normalization/__init__.py`) dispatches by file extension — `run_pipeline.py` calls `normalize(file_path)` and never needs to know the modality.
-
-### Audio path in detail
-
-```
+Audio pipeline in detail
 Audio file
     ↓
 Upload to Azure Blob Storage (container: audio-staging)
     ↓
 File < 5 MB?  →  Azure Speech SDK  (real-time, synchronous)
 File ≥ 5 MB?  →  Azure Speech REST (batch, async)
-          - Diarization enabled only for mono
-          - Stereo files are downmixed or diarization disabled automatically
-(note: “Azure Speech Batch does not support diarization for stereo audio.”)
+    - Diarization enabled only for mono
+    - Stereo files: diarization disabled automatically
+    - .m4a/.mp4/.aac always routed to batch (requires GStreamer otherwise)
     ↓
-Transcript text
+Full transcript text
     ↓
-GPT-4o-mini  (system: deterministic JSON extractor)
+Chunked extraction (6000 chars / chunk, 800 char overlap)
+    ↓
+GPT-4o  (system: deterministic JSON extractor)
+  - Each chunk extracted independently → partial JSON
+  - Aggregation pass: scalar fields = first non-null wins
+                      array fields  = union + deduplicate
+    ↓
+40+ canonical fields extracted (deliverables, obligations,
+milestones, governing law, parties, commercials, security, etc.)
     ↓
 Extraction dict  (_source: "llm_audio")
     ↓
 Same mapping matrix as PDF/DOCX
-```
+Why chunked? A 10-minute call at 150 words/minute exceeds 12,000 characters. Single-pass extraction silently drops everything after the truncation point. Chunked extraction with overlap ensures obligations discussed at minute 2 and deliverables discussed at minute 8 are both captured.
 
-### Analyzers (`analyzers/`)
+Important — model version: The LLM extraction uses the deployment set in AZURE_OPENAI_DEPLOYMENT. gpt-4o-mini (version 0125) was retired end of March 2026. Update your .env to a current deployment — recommended options:
 
+Deployment	Notes
+gpt-4o-mini (version 2024-07-18)	Direct replacement, same cost
+gpt-4o	Higher quality extraction, higher cost
+This only affects audio extraction. Content Understanding analyzers are unaffected.
+
+Analyzers (analyzers/)
 Three Azure Content Understanding analyzer schemas, each targeting a document type:
 
-- **deal-intake** — general contract metadata (parties, dates, values)
-- **nda** — NDA-specific fields (confidentiality term, governing law, disclosing party)
-- **sow** — SOW-specific fields (scope, deliverables, payment terms, milestones)
+deal-intake — general contract metadata (parties, dates, values, scope)
+nda — NDA-specific fields (confidentiality term, governing law, disclosing party)
+sow — SOW-specific fields (scope, deliverables, payment terms, milestones, governance)
+These are completely independent of the OpenAI deployment and are unaffected by model version changes.
 
-### Canonical schema (`canonical/`)
+Canonical schema (canonical/)
+All extraction results are normalised to a single schema defined in contract-package.schema.json. The mapping-matrix.yaml maps analyzer output keys to canonical field names with precedence rules when multiple analyzers extract the same field.
 
-All extraction results are normalised to a single schema defined in `contract-package.schema.json`. The `field-dictionary.md` documents every field. The `mapping-matrix.yaml` maps analyzer output keys to canonical field names with precedence rules when multiple analyzers extract the same field.
+Precedence scale (1–6, higher = wins on conflict):
 
-### Orchestration (`orchestration/functions/`)
-
-| File | Role |
-|---|---|
-| `run_pipeline.py` | Top-level coordinator — calls normalise → analyze → merge → canonical |
-| `map_to_canonical.py` | Applies mapping matrix to raw extractions |
-| `merge_engine.py` | Resolves conflicts between multiple extractions using precedence rules |
-
-### Generation (`generation/`)
-
-`The PDF generator (generation/generate_contract_pdf.py) uses ReportLab to build fully styled NDA/SOW PDFs:
+Source	Typical precedence
+SOW analyzer	4–6
+NDA analyzer	4–5
+Deal intake analyzer	4–5
+LLM audio	2–3
+Orchestration (orchestration/functions/)
+File	Role
+run_pipeline.py	Top-level coordinator — calls normalise → analyze → merge → canonical
+run_audio_pipeline.py	One-shot audio end-to-end
+map_to_canonical.py	Applies mapping matrix to raw extractions
+merge_engine.py	Resolves conflicts between multiple extractions using precedence rules
+Generation (generation/)
+The PDF generator (generation/generate_contract_pdf.py) uses ReportLab to build fully styled NDA/SOW PDFs:
 
 Navy cover page
 Status banner
@@ -106,593 +109,309 @@ Dynamic clause rendering
 Milestones, tables, obligations, exceptions
 Signature block
 Appendix: missing fields, conflicts, provenance
+Takes canonical JSON only — no DOCX template required.
 
-It takes canonical JSON only — no docx template required.
+Frontend (frontend/)
+A Next.js 15 App Router frontend providing a full contract workspace:
 
----
+/           → Upload page (drag-drop, contract type selector)
+/jobs       → Dashboard (metrics panel, job list, status badges)
+/jobs/[jobId] → Job workspace (tabs: Overview / Summary / Conflicts /
+                Missing Fields / Source / Canonical JSON / Downloads)
+Stack: Next.js 15 · TypeScript · Tailwind CSS · Zustand · Sonner (toasts)
 
-## API reference
+Key design decisions:
 
-Base URL (local): `http://localhost:8000`
-Auth: `X-API-Key` header required on all endpoints except `/health`.
+URL is source of truth for active job — useParams() reads jobId, not Zustand
+Zustand holds edit state only (overrides, dismissed conflicts)
+API calls go through Next.js rewrites (/api/jobs/* → FastAPI)
+Params are unwrapped with useParams() (Next.js 15 made params async)
+API reference
+Base URL (local): http://localhost:8000 Auth: X-API-Key header required on all endpoints except /health.
 
-### `POST /analyze`
-
+POST /analyze
 Upload a file and start the pipeline.
 
-```bash
 curl -X POST http://localhost:8000/analyze \
   -H "X-API-Key: your_key" \
   -F "file=@contract.pdf" \
   -F "contract_type=auto"
-```
-
 Response:
-```json
+
 {
   "job_id": "d93f35f3-64d4-4a6a-a4ff-21f1e8c4ff50",
   "status": "queued",
   "message": "Pipeline started. Poll /jobs/{job_id} for status.",
   "poll_url": "/jobs/d93f35f3-..."
 }
-```
+Supported file types: .pdf .docx .doc .eml .mp3 .wav .m4a contract_type values: nda | sow | both | auto
 
-Supported file types: `.pdf` `.docx` `.doc` `.eml` `.mp3` `.wav` `.m4a`
-`contract_type` values: `nda` | `sow` | `auto`
-
-### `GET /jobs/{job_id}`
-
+GET /jobs/{job_id}
 Poll job status.
 
-```bash
-curl http://localhost:8000/jobs/d93f35f3-... \
-  -H "X-API-Key: your_key"
-```
+Status	Meaning
+queued	Waiting to start
+processing	Pipeline running
+complete	Done — download URLs included
+failed	Error — see error field
+POST /jobs/{job_id}/regenerate
+Regenerate documents with field overrides and/or dismissed conflicts.
 
-Status values:
+{
+  "overrides": {
+    "legal.governingLaw": "Tamil Nadu, India",
+    "commercials.paymentTerms": "Net 30"
+  },
+  "dismissed_fields": ["scope.outOfScope"]
+}
+GET /download/{job_id}/nda
+GET /download/{job_id}/sow
+GET /download/{job_id}/canonical
+GET /download/{job_id}/source
+GET /jobs
+DELETE /jobs/{job_id}
+GET /health
+No auth required.
 
-| Status | Meaning |
-|---|---|
-| `queued` | Waiting to start |
-| `processing` | Pipeline running |
-| `complete` | Done — download URLs included in response |
-| `failed` | Error — see `error` field |
-
-### `GET /download/{job_id}/nda`
-
-Download the generated NDA PDF.
-
-### `GET /download/{job_id}/sow`
-
-Download the generated SOW PDF.
-
-### `GET /jobs`
-
-List all jobs and their statuses.
-
-### `DELETE /jobs/{job_id}`
-
-Delete a job and all associated files.
-
-### `GET /health`
-
-Health check — no auth required.
-
-```json
-{ "status": "ok", "version": "1.0.0", "time": "2026-03-24T09:01:12Z" }
-```
-
----
-
-## Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Azure subscription with the following resources provisioned:
-  - Azure Content Understanding (Document Intelligence)
-  - Azure Blob Storage
-  - Azure OpenAI (with a `gpt-4o-mini` deployment)
-  - Azure Speech Services
-
-### Install dependencies
-
-```bash
+{ "status": "ok", "version": "1.0.0", "time": "2026-04-01T00:00:00Z" }
+Setup
+Prerequisites
+Python 3.11+
+Node.js 18+ (for frontend)
+Azure subscription with:
+Azure Content Understanding (Document Intelligence)
+Azure Blob Storage
+Azure OpenAI (with a gpt-4o or gpt-4o-mini deployment — not the retired 0125 version)
+Azure Speech Services (Standard S0 tier for batch/audio)
+Backend
 pip install -r requirements.txt
-```
-
-Key packages:
-```
-fastapi
-uvicorn
-python-multipart
-python-dotenv
-azure-ai-documentintelligence
-azure-storage-blob
-azure-cognitiveservices-speech
-openai
-slowapi
-requests
-```
-
-### Configure environment
-
-Copy `.env.example` to `.env` and fill in all values:
-
-```bash
 cp .env.example .env
-```
+# Fill in all values — see Environment Variables below
+python api.py
+Swagger UI: http://localhost:8000/docs
 
-Required variables:
+Frontend
+cd frontend
+npm install
+cp .env.local.example .env.local
+# Set NEXT_PUBLIC_API_URL and NEXT_PUBLIC_API_KEY
+npm run dev
+Frontend: http://localhost:3000
 
-```env
-# API auth
+Environment variables
+# ── API auth ──────────────────────────────────────────────────────
 CONTRACT_API_KEY=your_strong_key_here
 
-# Azure Content Understanding
+# ── Azure Content Understanding ───────────────────────────────────
 AZURE_CU_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
 AZURE_CU_KEY=your_cu_key
 
-# Azure Blob Storage
+# ── Azure Blob Storage ────────────────────────────────────────────
 AZURE_BLOB_CONNECTION_STR=DefaultEndpointsProtocol=https;AccountName=...
 
-# Azure OpenAI
+# ── Azure OpenAI ──────────────────────────────────────────────────
+# IMPORTANT: Use a current deployment — gpt-4o-mini (0125) was retired March 2026
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_KEY=your_openai_key
-AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini   # must be version 2024-07-18 or later
 
-# Azure Speech Services
+# ── Azure Speech Services ─────────────────────────────────────────
+# Standard (S0) tier required for batch transcription (audio ≥ 5 MB)
 AZURE_SPEECH_KEY=your_speech_key
 AZURE_SPEECH_REGION=swedencentral
 
-# Speech Batch transcription (container SAS)
+# ── Speech options ────────────────────────────────────────────────
+SPEECH_ALLOW_BATCH=true          # set false on Free (F0) tier
+SPEECH_DIARIZATION=false         # true only for mono audio with multiple speakers
 BATCH_USE_CONTAINER=true
 AUDIO_CONTAINER_SAS=https://<account>.blob.core.windows.net/<container>?<sas_token>
-```
 
-### GPT-4o-mini system prompt
+# ── Frontend (.env.local) ─────────────────────────────────────────
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_KEY=your_strong_key_here
+GPT-4o system prompt
+In Azure OpenAI Studio → your deployment → System message:
 
-In Azure OpenAI Studio → your deployment → System message, set:
-
-```
 You are a structured contract-analysis model. Your primary job is to take
 unstructured or messy text (including audio transcripts) and transform it
 into a clean JSON object according to the schema provided in the user prompt.
 
 Rules you must always follow:
 * Return ONLY valid JSON. Never include explanations, markdown, or text outside JSON.
+* Never return an empty response — always return a valid JSON object.
 * Follow the exact field names and structure the user provides.
 * Use null for missing or unknown fields.
 * Dates must be normalized to YYYY-MM-DD when possible.
 * Do not hallucinate facts; base all output on the given text.
-* If parts of the input are unclear, infer carefully but do not invent details.
+* For array fields, extract every item — never truncate or summarise lists.
 * Maintain stable, deterministic formatting.
 
 You are not a chat assistant. You are a deterministic JSON extraction system.
 Whatever the user prompt says takes highest priority.
-```
-### Analyzer Classification
-```
-Automatic NDA vs SOW Classification
-After merging the canonical package, run_audio_pipeline.py automatically determines whether the output PDF should be:
+Testing
+Tests are grouped using pytest markers.
 
-NDA (if parties.ndaType == "NDA")
-SOW (if strong signals in scope.* or commercials.*)
-Can be overridden with --render nda|sow|both
-```
-Quick Examples:
-```
-# Audio → NDA PDF (auto)
-python -m orchestration.functions.run_audio_pipeline --input meeting.m4a
-
-# Audio → both NDA and SOW PDFs
-python -m orchestration.functions.run_audio_pipeline --input meeting.m4a --render both
-
-# PDF contract → canonical → NDA PDF
-python -m orchestration.functions.run_pipeline --input contract.pdf --type nda
-```
-
-### Run locally
-
-```bash
-python api.py
-```
-
-API docs (Swagger UI): http://localhost:8000/docs
-
-### Run tests
-
-```bash
-# Full API test suite
-python test_api.py --file tests/fixtures/deal-intake-sample-structured.pdf
-
-# SOW fixture
-python test_api.py --file tests/fixtures/sow_email.pdf
-```
-Here is a **clean, polished, ready‑to‑paste README section** specifically for your **Golden Test Suite**, matching your repo’s Makefile, pytest markers, fixtures, and file structure.
-
-Just copy this into your README under a “Testing” or “Developer Guide” section.
-
-***
-
-# **Testing & Golden Snapshot Suite**
-
-This repository includes a **full multi‑layer test suite** that validates the contract‑intelligence pipeline end‑to‑end — from mapping and merging to PDF generation and full Azure‑backed extraction.  
-Tests are grouped using **pytest markers** and executed via either `pytest` or the provided **Makefile** shortcuts.
-
-***
-
-## Test Types
-
-### **Unit Tests (`-m unit`)**
-
-Fast, pure‑Python tests.  
-No Azure, no Blob Storage, no network calls.
-
-Validates:
-
-*   `map_to_canonical` transforms
-*   `merge_engine` conflict resolution
-*   canonical schema shape
-*   PDF utility helpers
-*   provenance + rule precedence logic
-
-Run:
-
-```bash
+Test types
+Marker	What it tests	Azure required
+unit	Mapping transforms, merge engine, schema validation	No
+pdf	ReportLab PDF rendering, NDA/SOW output	No
+golden	Canonical output regression against frozen snapshots	No
+integration	Full Azure-backed pipeline end-to-end	Yes
+# Fast — no Azure needed
 pytest -m unit -v
-```
-
-***
-
-### **PDF Generation Tests (`-m pdf`)**
-
-Validate the ReportLab PDF renderer:
-
-*   NDA & SOW PDFs generate correctly
-*   Milestones tables
-*   Risk register
-*   Conflict appendix
-*   Empty canonical handling
-*   Output directory auto‑creation
-
-Run:
-
-```bash
 pytest -m pdf -v
-```
+pytest -m "golden and not integration" -v
 
-***
-
-### **Golden Snapshot Tests (`-m golden`)**
-
-These compare pipeline outputs to frozen **golden JSON files** stored in:
-
-    tests/golden-cases/
-
-Useful for:
-
-*   Regression detection after mapping/merge/schema changes
-*   Ensuring stable canonical outputs
-
-Run:
-
-```bash
-pytest -m golden -v
-```
-
-***
-
-### **Integration Tests (`-m integration`)**
-
-Full Azure‑backed pipeline tests.
-
-Requires:
-
-*   `.env` with valid Azure keys
-*   CU/LLM/Speech/Blob services
-*   A valid **container SAS** (`AUDIO_CONTAINER_SAS`)
-
-Run:
-
-```bash
+# Full suite (requires .env with valid Azure keys)
 pytest -m integration -v
-```
+Makefile shortcuts
+make test          # unit + pdf + golden
+make test-all      # everything including integration
+make test-unit
+make test-pdf
+make test-golden
+make generate-golden   # regenerate golden snapshots after intentional changes
+Windows users without make: use pytest directly or run in Git Bash.
 
-These tests use real fixtures:
+Regenerating golden snapshots
+Run after intentionally changing mapping-matrix.yaml, merge_engine.py, contract-package.schema.json, or any extraction behavior:
 
-    tests/fixtures/deal-intake-sample-structured.pdf
-    tests/fixtures/sow_email.pdf
-    tests/fixtures/*.m4a (optional)
-
-If audio fixtures are missing, tests skip gracefully.
-
-***
-
-## Makefile Commands (Windows users: use `pytest` directly or run in Git Bash)
-
-    # Fast unit tests (recommended before every commit)
-    make test-unit
-
-    # Validate PDF rendering
-    make test-pdf
-
-    # Compare against golden snapshots
-    make test-golden
-
-    # Unit + PDF + Golden (no Azure needed)
-    make test
-
-    # Full suite including Azure integrations
-    make test-all
-
-    # Regenerate golden snapshot files
-    make generate-golden
-
-***
-
-## Regenerating Golden Snapshots
-
-If you intentionally modify:
-
-*   `mapping-matrix.yaml`,
-*   `merge_engine.py`,
-*   `contract-package.schema.json`, or
-*   any extraction behavior,
-
-then regenerate golden files:
-
-```bash
 make generate-golden
-```
-
-Equivalent manual command:
-
-```bash
+# or:
 pytest -m integration -v --generate-golden
-```
-
-This rewrites all JSON snapshots under:
-
-    tests/golden-cases/
-
-***
-
-## Running Tests on Windows
-
-Windows does **not** include `make` by default.  
-Options:
-
-*   Use **pytest directly** (recommended):
-    ```bash
-    pytest -m unit -v
-    pytest -m pdf -v
-    pytest -m golden -v
-    pytest -m integration -v
-    ```
-*   Or run `make` inside **Git Bash**
-*   Or install GNU Make via Chocolatey:
-    ```powershell
-    choco install make
-    ```
-
-***
-
-## Why This Suite Matters
-
-*   Guarantees **deterministic canonical JSON** after mapping & merge
-*   Ensures **PDFs remain valid** across template or clause updates
-*   Detects regressions when adding new sources (e.g., `llm_audio`)
-*   Validates schema evolution safely
-*   Enables safe refactors and production‑grade CI/CD
-
-***
-
----
-
-## Project structure
-
-```
+Project structure
 contract-intelligence-platform/
 │
 ├── analyzers/                      # Azure CU analyzer schemas
 │   ├── deal-intake/
-│   │   ├── samples/
-│   │   ├── __init__.py
-│   │   └── deal-intake-schema.json
 │   ├── nda/
-│   │   ├── samples/
-│   │   ├── __init__.py
-│   │   └── nda-extractor-enterprise-v1_*.json
 │   └── sow/
-│       ├── samples/
-│       ├── __init__.py
-│       └── sow-extractor-enterprise_*.json
 │
 ├── canonical/                      # Canonical schema + mapping rules
-│   ├── golden-test-cases/
-│   ├── __init__.py
 │   ├── contract-package.schema.json
-│   ├── example-contract-package.json
+│   ├── mapping-matrix.yaml         # Source field → canonical path + precedence
 │   ├── field-dictionary.md
-│   ├── mapping-matrix.yaml
 │   └── precedence-rules.yaml
 │
 ├── config/
-│   ├── __init__.py
 │   └── azure_clients.py            # Azure service client factory
 │
-├── generation/                     # PDF generation
-│   ├── clause-selection-rules.yaml
-│   ├── generate_contract_pdf.py
-│   ├── golden-template-prompt.md
-│   └── output-contract-template.docx
+├── frontend/                       # Next.js 15 workspace
+│   ├── app/
+│   │   ├── page.tsx                # Upload page
+│   │   ├── jobs/
+│   │   │   ├── page.tsx            # Dashboard
+│   │   │   └── [jobId]/page.tsx    # Job workspace
+│   ├── components/
+│   │   ├── layout/                 # AppShell, Header, NavTabs, Footer
+│   │   ├── upload/                 # UploadDropzone, ContractTypeSelect
+│   │   ├── dashboard/              # MetricsPanel, JobList, JobRow
+│   │   ├── viewer/                 # ContractViewer, tabs, preview, JSON
+│   │   ├── summary/                # SummarySection, SummaryRow
+│   │   ├── conflicts/              # ConflictList, ConflictCard, ConflictResolver
+│   │   ├── missing/                # MissingFieldTree, MissingFieldEditor
+│   │   └── ui/                     # Button, Card, Badge, Input, Tabs, Toast
+│   ├── hooks/
+│   │   ├── useUploadJob.ts
+│   │   ├── useJobPolling.ts        # Polls every 3s, stops on complete/failed
+│   │   ├── useJobList.ts
+│   │   └── useRegenerateJob.ts
+│   ├── lib/
+│   │   ├── api/
+│   │   │   ├── client.ts           # Base fetch + X-API-Key injection
+│   │   │   ├── jobs.ts             # All API functions
+│   │   │   └── types.ts            # TypeScript types
+│   │   └── format.ts               # extractSummarySections, extractConflicts,
+│   │                               # extractMissingFields — aligned to canonical shape
+│   ├── store/
+│   │   └── useAppStore.ts          # Zustand: overrides + dismissedFields only
+│   └── next.config.js              # Rewrites: /api/jobs/* → FastAPI
 │
-├── normalization/                  # Input normalizers (all modalities)
+├── generation/
+│   └── generate_contract_pdf.py    # ReportLab NDA/SOW renderer
+│
+├── normalization/
 │   ├── __init__.py                 # Modality router
-│   ├── audio_handler.py            # Speech → GPT-4o-mini
-│   ├── blob_uploader.py            # Azure Blob upload helper
-│   ├── docx_handler.py             # DOCX → Azure CU
-│   ├── email_handler.py            # EML → Azure CU / text
-│   └── pdf_handler.py              # PDF → Azure CU
+│   ├── audio_handler.py            # Speech → chunked GPT-4o extraction
+│   ├── blob_uploader.py
+│   ├── docx_handler.py
+│   ├── email_handler.py
+│   └── pdf_handler.py
 │
-├── orchestration/
-│   ├── functions/
-│   │   ├── __init__.py
-│   │   ├── map_to_canonical.py     # Applies mapping matrix
-│   │   ├── merge_engine.py         # Conflict resolution
-│   │   └── run_pipeline.py         # Top-level coordinator
-(PDF/DOCX/EML)
-│   │   └── run_audio_pipeline.py    # one‑shot audio 
-│   └── __init__.py
-│
-├── search/                         # Index files for search/retrieval
-│   ├── __init__.py
-│   ├── clause-library-index.json
-│   ├── contract-package-index.json
-│   └── evidence-index.json
+├── orchestration/functions/
+│   ├── run_pipeline.py
+│   ├── run_audio_pipeline.py
+│   ├── map_to_canonical.py
+│   └── merge_engine.py
 │
 ├── tests/
-│   ├── expected-canonical-output/
 │   ├── fixtures/
-│   │   ├── deal-intake-sample-structured.pdf
-│   │   └── sow_email.pdf
 │   ├── golden-cases/
 │   └── output/
 │
 ├── validators/
-│   ├── __init__.py
 │   └── schema_validator.py
 │
 ├── api.py                          # FastAPI application
-├── test_api.py                     # API test suite
 ├── requirements.txt
-├── .env                            # Your secrets (never commit)
-├── .env.example                    # Template — safe to commit
+├── .env                            # Never commit
+├── .env.example
 └── README.md
-```
+Known limitations and next steps
+In-memory job store
+JOBS in api.py is a Python dict — it resets on every API restart. Fine for local development and demos. Before deploying, swap for SQLite or Azure Table Storage:
 
----
-
-## Security checklist
-
-Before sharing or deploying this API:
-
-- [ ] Replace the default `CONTRACT_API_KEY` in `.env` with a strong random key
-- [ ] Add `.env` to `.gitignore` — **never commit secrets**
-- [ ] Add `api_uploads/` and `api_outputs/` to `.gitignore` — these contain client documents
-- [ ] Lock `allow_origins` in `api.py` CORS config to your actual frontend domain
-- [ ] Rotate the `AZURE_CU_KEY` visible in your `.env` screenshots
-
-`.gitignore` should include at minimum:
-```
-.env
-api_uploads/
-api_outputs/
-__pycache__/
-*.pyc
-```
-
----
-
-## Known limitations and next steps
-
-### In-memory job store
-
-`JOBS` in `api.py` is a Python dict — it resets every time the API restarts. Fine for local development. Before deploying to Azure Container Apps, swap it for SQLite (one afternoon) or Azure Table Storage (same effort, fully managed).
-
-```python
-# Quick SQLite swap — drop-in replacement for JOBS dict
-# pip install tinydb
+# Quick SQLite swap
 from tinydb import TinyDB
 db = TinyDB("jobs.db")
 JOBS = db.table("jobs")
-```
+Audio file size
+Current split point: 5 MB (~30 minutes). For longer recordings, increase _BATCH_MAX_WAIT_SECONDS in audio_handler.py.
 
-### Audio file size limit
+Audio extraction field coverage
+The LLM extraction prompt covers 40+ canonical fields including deliverables, obligations, milestones, governance, security, and legal terms. Chunked extraction (6000 chars/chunk, 800 char overlap) ensures long recordings don't silently drop fields mentioned in later segments.
 
-The current split point is 5 MB (roughly 30 minutes of speech). For very long recordings, increase `_BATCH_MAX_WAIT_SECONDS` in `audio_handler.py`.
+OpenAI model version
+gpt-4o-mini version 0125 was retired March 2026. Update AZURE_OPENAI_DEPLOYMENT in .env to version 2024-07-18 or switch to gpt-4o. No other code changes required — the deployment name is read from env at runtime.
 
-### Deploying to Azure Container Apps
-
-```bash
-# 1. Build image
+Deployment (Azure Container Apps)
 docker build -t contract-intel .
-
-# 2. Push to Azure Container Registry
 az acr build --registry yourregistry --image contract-intel .
-
-# 3. Deploy
 az containerapp create \
   --name contract-intel \
   --resource-group your-rg \
   --image yourregistry.azurecr.io/contract-intel \
   --env-vars @.env
-```
+For the frontend, deploy to Azure Static Web Apps or Vercel. Set NEXT_PUBLIC_API_URL to your Container App URL and configure CORS in api.py to allow your frontend domain.
 
-### Adding a frontend
+Security checklist
+Before sharing or deploying:
 
-The API is fully documented at `/docs`. A React or Next.js frontend can integrate in a day — the only endpoints needed are `POST /analyze`, `GET /jobs/{id}`, and `GET /download/{id}/nda|sow`.
+ Replace default CONTRACT_API_KEY with a strong random key
+ Add .env to .gitignore — never commit secrets
+ Add api_uploads/ and api_outputs/ to .gitignore
+ Lock allow_origins in api.py CORS config to your frontend domain
+ Rotate any Azure keys visible in screenshots or logs
+ Use Azure Key Vault for secrets in production
+.gitignore minimum:
 
----
+.env
+api_uploads/
+api_outputs/
+__pycache__/
+*.pyc
+frontend/.next/
+frontend/node_modules/
+Continuous Integration
+GitHub Actions runs on every push and pull request:
 
-## How audio extraction works end to end
+Unit tests (-m unit)
+PDF tests (-m pdf)
+Golden snapshot tests (-m "golden and not integration")
+Integration tests are skipped in CI — they require live Azure credentials and are run manually.
 
-1. Client uploads `.mp3` / `.wav` / `.m4a` to `POST /analyze`
-2. API saves file to `api_uploads/`, creates a job, returns `job_id`
-3. Background task calls `run_pipeline(file_path)`
-4. `normalize()` routes to `audio_handler.handle_audio()`
-5. File uploaded to Azure Blob container `audio-staging`
-6. File size determines transcription mode:
-   - **< 5 MB** → Speech SDK continuous recognition (synchronous)
-   - **≥ 5 MB** → Speech REST batch API (async, no speaker diarization)
-7. Transcript sent to GPT-4o-mini with field extraction prompt
-8. Result tagged `_source: "llm_audio"` and returned to pipeline
-9. Mapping matrix + merge engine produce canonical JSON
-10. PDF generator renders NDA and SOW from canonical JSON
-11. Job status → `complete`, download URLs available
+Workflow file: .github/workflows/tests.yml
 
----
-
----
-
-## Continuous Integration (GitHub Actions)
-
-This repository includes a full CI workflow using **GitHub Actions**.
-
-Every time you **push** or create a **pull request**, GitHub automatically:
-
-checks out the code  
-sets up Python  
-installs all dependencies  
-runs:
-  - unit tests (`-m unit`)
-  - PDF tests (`-m pdf`)
-  - golden snapshot tests (`-m "golden and not integration"`)  
-reports pass/fail status  
-updates the CI badge at the top of this README
-
-The CI workflow file lives at:
-.github/workflows/tests.yml
-
-You can see all CI runs here:
-
-**https://github.com/JoshJaiswal/contract_golden_template/actions**
-
-### Why CI Matters
-
-- Prevents accidental breaks to the mapping matrix  
-- Ensures merge engine precedence rules stay correct  
-- Guarantees PDF output consistency  
-- Protects canonical schema evolution  
-- Allows safe refactoring  
-- Provides confidence before deployment  
-
-Integration tests (`-m integration`) are intentionally **skipped in CI**  
-because they require Azure credentials (Speech, CU, Blob, OpenAI).
-These tests are meant to be run manually on a dev machine.
-
----
-## Licence
-
+Licence
 Private. All rights reserved.
+
