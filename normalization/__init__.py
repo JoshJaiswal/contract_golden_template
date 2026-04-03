@@ -11,7 +11,7 @@ Supported input types:
     .pdf            → pdf_handler  → Azure CU analysis
     .docx / .doc    → docx_handler → Azure CU analysis
     .eml            → email_handler → Azure CU / text extraction
-    .mp3 / .wav / .m4a → audio_handler → Azure Speech + GPT-4o-mini
+    .mp3 / .wav / .m4a → audio_handler → Azure Speech + GPT-4o
 """
 
 import logging

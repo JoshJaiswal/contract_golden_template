@@ -59,6 +59,7 @@ crash.log
 # Misc
 *.sqlite3
 *.key
+*.m4a
 
 out/
 api_uploads/

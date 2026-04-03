@@ -12,7 +12,7 @@ Required env vars:
     AZURE_BLOB_CONNECTION_STR  Storage account connection string
     AZURE_OPENAI_ENDPOINT      Azure OpenAI endpoint URL
     AZURE_OPENAI_KEY           Azure OpenAI API key
-    AZURE_OPENAI_DEPLOYMENT    GPT-4o deployment name (e.g. "gpt-4o-mini")
+    AZURE_OPENAI_DEPLOYMENT    GPT-4o deployment name (e.g. "gpt-4o")
     AZURE_SPEECH_KEY           Speech Services subscription key
     AZURE_SPEECH_REGION        Speech Services region (e.g. "uksouth")
 """
@@ -67,7 +67,7 @@ def get_blob_client():
 @lru_cache(maxsize=1)
 def get_openai_client():
     """
-    Azure OpenAI client for GPT-4o-mini extraction.
+    Azure OpenAI client for GPT-4o extraction.
     pip install openai
     """
     endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
@@ -114,4 +114,4 @@ def get_speech_endpoint() -> tuple[str, str]:
 
 def get_openai_deployment() -> str:
     """Return the configured GPT-4o deployment name."""
-    return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o-mini")
+    return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
