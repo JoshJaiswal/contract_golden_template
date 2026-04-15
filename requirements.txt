@@ -25,6 +25,9 @@ python-dotenv>=1.0.0                 # Load .env file
 fastapi>=0.111.0
 uvicorn>=0.30.0
 
+#cosmosDB backend
+azure-cosmos>=4.5.1
+
 # Dev/testing
 pytest>=8.2.0
 pytest-asyncio>=0.23.0

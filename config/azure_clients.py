@@ -25,6 +25,10 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 log = logging.getLogger(__name__)
+from azure.cosmos import CosmosClient, ContainerProxy
+
+_cosmos_client: CosmosClient | None = None
+_cosmos_container: ContainerProxy | None = None
 
 
 def _require_env(key: str) -> str:
@@ -115,3 +119,29 @@ def get_speech_endpoint() -> tuple[str, str]:
 def get_openai_deployment() -> str:
     """Return the configured GPT-4o deployment name."""
     return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+
+def get_cosmos_container() -> ContainerProxy:
+    """
+    Returns a cached Cosmos DB container client.
+    Call this anywhere you need to read/write jobs.
+    """
+    global _cosmos_client, _cosmos_container
+
+    if _cosmos_container is not None:
+        return _cosmos_container
+
+    endpoint = os.getenv("AZURE_COSMOS_ENDPOINT")
+    key = os.getenv("AZURE_COSMOS_KEY")
+    database_id = os.getenv("AZURE_COSMOS_DATABASE", "contract-intelligence")
+    container_id = os.getenv("AZURE_COSMOS_CONTAINER", "jobs")
+
+    if not endpoint or not key:
+        raise RuntimeError(
+            "AZURE_COSMOS_ENDPOINT and AZURE_COSMOS_KEY must be set in .env"
+        )
+
+    _cosmos_client = CosmosClient(endpoint, credential=key)
+    database = _cosmos_client.get_database_client(database_id)
+    _cosmos_container = database.get_container_client(container_id)
+
+    return _cosmos_container

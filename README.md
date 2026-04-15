@@ -383,7 +383,8 @@ make generate-golden
 
 # **Known Limitations & Next Steps**
 
-*   In‑memory job store → replace with SQLite / Azure Table
+*   Job store — Azure Cosmos DB (NoSQL, serverless)
+*   Jobs persist across API restarts and are queryable by status. Partition key is job_id.
 *   Audio split point at 5MB
 *   Chunked audio extraction logic
 *   Update OpenAI deployments as models retire

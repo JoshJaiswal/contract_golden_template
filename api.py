@@ -40,6 +40,46 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
+# ── Cosmos DB job helpers ─────────────────────────────────────────────────────
+from config.azure_clients import get_cosmos_container
+
+
+def _job_get(job_id: str) -> dict | None:
+    """Fetch a single job document from Cosmos DB."""
+    try:
+        container = get_cosmos_container()
+        item = container.read_item(item=job_id, partition_key=job_id)
+        return dict(item)
+    except Exception:
+        return None
+
+
+def _job_upsert(job: dict) -> None:
+    """Insert or update a job document in Cosmos DB."""
+    container = get_cosmos_container()
+    # Cosmos requires an 'id' field — map job_id to id
+    doc = {**job, "id": job["job_id"]}
+    container.upsert_item(doc)
+
+
+def _job_list() -> list[dict]:
+    """Return all jobs ordered by created_at descending."""
+    container = get_cosmos_container()
+    query = "SELECT * FROM c ORDER BY c.created_at DESC"
+    items = list(container.query_items(
+        query=query,
+        enable_cross_partition_query=True
+    ))
+    return items
+
+
+def _job_delete(job_id: str) -> None:
+    """Delete a job document from Cosmos DB."""
+    container = get_cosmos_container()
+    container.delete_item(item=job_id, partition_key=job_id)
+
+
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +129,6 @@ def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
 
 # ── Job storage (in-memory for local, swap for Redis/DB in production) ────────
 # Structure: { job_id: { status, created_at, file_name, error, outputs } }
-JOBS: dict = {}
 
 # Directories
 UPLOAD_DIR = Path("api_uploads")
@@ -112,13 +151,17 @@ SUPPORTED_TYPES = {
 
 # ── Background pipeline runner ────────────────────────────────────────────────
 async def run_pipeline_job(job_id: str, file_path: str, contract_type: str):
-    """
-    Run the full pipeline in the background.
-    Updates JOBS[job_id] with status and output paths.
-    """
+    """Run the full pipeline in the background and persist status to Cosmos DB."""
     import asyncio
 
-    JOBS[job_id]["status"] = "processing"
+    job = _job_get(job_id)
+    if not job:
+        # If the job doc is missing, nothing we can do safely.
+        log.error(f"[Job {job_id}] Missing job document in Cosmos — aborting")
+        return
+
+    job["status"] = "processing"
+    _job_upsert(job)
     log.info(f"[Job {job_id}] Pipeline starting — file={Path(file_path).name}")
 
     try:
@@ -131,20 +174,25 @@ async def run_pipeline_job(job_id: str, file_path: str, contract_type: str):
             file_path,
             contract_type,
         )
-        JOBS[job_id].update({
-            "status":     "complete",
+
+        job = _job_get(job_id) or job
+        job.update({
+            "status":       "complete",
             "completed_at": datetime.now(timezone.utc).isoformat(),
-            "outputs":    result,
+            "outputs":      result,
         })
+        _job_upsert(job)
         log.info(f"[Job {job_id}] Complete")
 
     except Exception as e:
         log.error(f"[Job {job_id}] Failed: {e}", exc_info=True)
-        JOBS[job_id].update({
-            "status": "failed",
-            "error":  str(e),
+        job = _job_get(job_id) or job
+        job.update({
+            "status":       "failed",
+            "error":        str(e),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
+        _job_upsert(job)
 
 def _run_pipeline_sync(job_id: str, file_path: str, contract_type: str) -> dict:
     """
@@ -263,7 +311,6 @@ async def analyze(
     Supported formats: PDF, DOCX, EML, MP3, WAV, M4A
     """
     # Validate file type
-    content_type = file.content_type or ""
     file_ext = Path(file.filename or "").suffix.lower()
 
     allowed_extensions = {".pdf", ".docx", ".doc", ".eml", ".mp3", ".wav", ".m4a"}
@@ -294,16 +341,17 @@ async def analyze(
         f"name={file.filename}, size={file_path.stat().st_size} bytes"
     )
 
-    # Register job
-    JOBS[job_id] = {
-        "job_id":       job_id,
-        "status":       "queued",
-        "created_at":   datetime.now(timezone.utc).isoformat(),
-        "file_name":    file.filename,
+    # Register job in Cosmos DB
+    job = {
+        "job_id":        job_id,
+        "status":        "queued",
+        "created_at":    datetime.now(timezone.utc).isoformat(),
+        "file_name":     file.filename,
         "contract_type": contract_type,
-        "outputs":      None,
-        "error":        None,
+        "error":         None,
+        "outputs":       {},
     }
+    _job_upsert(job)
 
     # Start pipeline in background
     import asyncio
@@ -333,19 +381,17 @@ def get_job(
     - complete    — finished, download URLs available
     - failed      — error occurred, see 'error' field
     """
-    if job_id not in JOBS:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    job = JOBS[job_id].copy()
+    job = _job_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     # Add download URLs if complete
-    if job["status"] == "complete":
+    if job.get("status") == "complete":
         base = f"/download/{job_id}"
         outputs = job.get("outputs") or {}
         job["download_urls"] = {
             k: f"{base}/{k.replace('_pdf','')}"
             for k in outputs
-            if k.endswith("_pdf")
         }
 
     return job
@@ -392,19 +438,8 @@ def download_sow(
 @app.get("/jobs", tags=["System"])
 def list_jobs(_key: str = Security(verify_api_key)):
     """List all jobs and their current status."""
-    return {
-        "total": len(JOBS),
-        "jobs": [
-            {
-                "job_id":       j["job_id"],
-                "status":       j["status"],
-                "file_name":    j["file_name"],
-                "contract_type": j["contract_type"],
-                "created_at":   j["created_at"],
-            }
-            for j in JOBS.values()
-        ],
-    }
+    jobs = _job_list()
+    return {"total": len(jobs), "jobs": jobs}
 
 
 @app.delete("/jobs/{job_id}", tags=["System"])
@@ -413,7 +448,8 @@ def delete_job(
     _key:   str = Security(verify_api_key),
 ):
     """Delete a job and its associated files."""
-    if job_id not in JOBS:
+    job = _job_get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     # Clean up files
@@ -425,34 +461,42 @@ def delete_job(
     if upload_file:
         upload_file.unlink(missing_ok=True)
 
-    del JOBS[job_id]
+    # Delete job document from Cosmos
+    _job_delete(job_id)
     return {"message": f"Job {job_id} deleted"}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def _validate_download(job_id: str):
-    if job_id not in JOBS:
+# ── Helpers# ── Helpers ───────────────────────────────────────────────────────────────────
+def _validate_download(job_id: str) -> dict:
+    """Return job if downloadable; otherwise raise appropriate HTTPException."""
+    job = _job_get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-    job = JOBS[job_id]
-    if job["status"] == "processing":
+
+    status = job.get("status")
+    if status == "processing":
         raise HTTPException(status_code=202, detail="Job still processing")
-    if job["status"] == "failed":
+    if status == "failed":
         raise HTTPException(
             status_code=500,
             detail=f"Job failed: {job.get('error', 'unknown error')}"
         )
-    if job["status"] != "complete":
-        raise HTTPException(status_code=400, detail=f"Job status: {job['status']}")
+    if status != "complete":
+        raise HTTPException(status_code=400, detail=f"Job status: {status}")
+
+    return job
 
 
 def _safe_filename(job_id: str, doc_type: str) -> str:
     """Generate a clean download filename from job metadata."""
-    job = JOBS.get(job_id, {})
+    job = _job_get(job_id) or {}
     original = Path(job.get("file_name", "contract")).stem
+
     # Sanitise
     safe = "".join(c for c in original if c.isalnum() or c in "-_ ")
     safe = safe.strip()[:40] or "contract"
     return f"{safe}-{doc_type}.pdf"
+
 
 @app.get("/download/{job_id}/canonical", tags=["Downloads"])
 def download_canonical(job_id: str, _key: str = Security(verify_api_key)):
@@ -465,11 +509,11 @@ def download_canonical(job_id: str, _key: str = Security(verify_api_key)):
         filename=f"{job_id}-canonical.json"
     )
 
-
 @app.get("/download/{job_id}/source", tags=["Downloads"])
 def download_source(job_id: str, _key: str = Security(verify_api_key)):
     """Return the original uploaded file so the frontend can preview it."""
-    if job_id not in JOBS:
+    job = _job_get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     matches = list(UPLOAD_DIR.glob(f"{job_id}.*"))
@@ -490,14 +534,13 @@ def download_source(job_id: str, _key: str = Security(verify_api_key)):
         ".txt":  "text/plain",
     }
     media_type = mime_map.get(ext, "application/octet-stream")
-    original_name = JOBS[job_id].get("file_name", f"source{ext}")
+    original_name = job.get("file_name", f"source{ext}")
 
     return FileResponse(
         path=str(source_path),
         media_type=media_type,
         filename=original_name,
     )
-
 
 # ── Regenerate ────────────────────────────────────────────────────────────────
 
@@ -531,19 +574,19 @@ async def regenerate_job(
           "dismissed_fields": ["field_name_1", "field_name_2"]
         }
 
-    - overrides      — fields where the user picked an alternative or custom value
+    - overrides        — fields where the user picked an alternative or custom value
     - dismissed_fields — fields where the user accepted the chosen value as correct;
                          these are stripped from canonical.conflicts so they won't
                          reappear as conflicts on the next load
     """
-    if job_id not in JOBS:
+    job = _job_get(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    job = JOBS[job_id]
-    if job["status"] != "complete":
+    if job.get("status") != "complete":
         raise HTTPException(
             status_code=400,
-            detail=f"Job must be 'complete' to regenerate. Current status: {job['status']}",
+            detail=f"Job must be 'complete' to regenerate. Current status: {job.get('status')}",
         )
 
     canonical_path = OUTPUT_DIR / job_id / "canonical.json"
@@ -554,8 +597,9 @@ async def regenerate_job(
         )
 
     # Re-queue the same job_id so frontend poll works as-is
-    JOBS[job_id]["status"] = "queued"
-    JOBS[job_id]["error"]  = None
+    job["status"] = "queued"
+    job["error"]  = None
+    _job_upsert(job)
 
     import asyncio
     asyncio.create_task(
@@ -591,7 +635,15 @@ async def _run_regenerate_job(
 ):
     """Background task: patch canonical → remove dismissed conflicts → regenerate PDFs."""
     import asyncio
-    JOBS[job_id]["status"] = "processing"
+
+    job = _job_get(job_id)
+    if not job:
+        log.error(f"[Job {job_id}] Missing job document in Cosmos — aborting regeneration")
+        return
+
+    job["status"] = "processing"
+    _job_upsert(job)
+
     log.info(
         f"[Job {job_id}] Regenerating — "
         f"overrides: {list(overrides.keys())} | dismissed: {dismissed_fields}"
@@ -607,19 +659,25 @@ async def _run_regenerate_job(
             dismissed_fields,
             contract_type,
         )
-        JOBS[job_id].update({
+
+        job = _job_get(job_id) or job
+        job.update({
             "status":       "complete",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "outputs":      result,
         })
+        _job_upsert(job)
         log.info(f"[Job {job_id}] Regeneration complete")
+
     except Exception as e:
         log.error(f"[Job {job_id}] Regeneration failed: {e}", exc_info=True)
-        JOBS[job_id].update({
+        job = _job_get(job_id) or job
+        job.update({
             "status":       "failed",
             "error":        str(e),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
+        _job_upsert(job)
 
 
 def _set_nested(d: dict, dot_path: str, value):
