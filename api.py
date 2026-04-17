@@ -28,6 +28,7 @@ Endpoints:
     GET  /graph/party/{party_name}  — graph: all contracts involving a party
     GET  /graph/{job_id}/full       — graph: all vertices + edges for a contract
     POST /graph/query               — graph: run a raw Gremlin query (power users)
+    POST /assistant/ask             — AI assistant: natural language questions about contracts
     GET  /health                    — health check
 """
 
@@ -37,7 +38,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 import uvicorn
 from dotenv import load_dotenv
@@ -606,7 +607,7 @@ def _regenerate_sync(
     1. Load saved canonical.json
     2. Remove dismissed conflicts from canonical["conflicts"]
     3. Apply field overrides (dot-notation)
-    4. Save updated canonical.
+    4. Save updated canonical.json
     5. Regenerate PDFs
     """
     import sys, json
@@ -841,8 +842,67 @@ def _safe_filename(job_id: str, doc_type: str) -> str:
     return f"{safe}-{doc_type}.pdf"
 
 
+# ── AI Assistant ──────────────────────────────────────────────────────────────
+
+class AssistantRequest(BaseModel):
+    question: str
+    job_id: Optional[str] = None
+    # Optional — scope the assistant to a specific contract.
+    # If omitted, the assistant searches across all contracts.
+
+    conversation_history: List[dict] = []
+    # Previous turns for multi-turn support.
+    # Each item: {"role": "user"|"assistant", "content": "..."}
+
+
+@app.post("/assistant/ask", tags=["Assistant"])
+def assistant_ask(
+    body: AssistantRequest,
+    _key: str = Security(verify_api_key),
+):
+    """
+    Ask the Contract Intelligence Assistant a natural language question.
+
+    The assistant combines the knowledge graph (for relational/cross-contract
+    questions) and canonical JSON files (for detailed clause questions) to
+    produce grounded, cited answers.
+
+    Examples:
+    - "Which contracts involve Acme Corp?"
+    - "What are the payment terms in job abc-123?"
+    - "List all contracts that need review"
+    - "Are there any contracts with personal data processing?"
+    - "Compare the confidentiality terms across all NDAs"
+    - "What deliverables are in scope for the TechSolutions SOW?"
+
+    For multi-turn conversation, pass previous turns in conversation_history:
+        [
+          {"role": "user", "content": "What are the payment terms?"},
+          {"role": "assistant", "content": "The payment terms are Net 30..."}
+        ]
+    """
+    if not body.question.strip():
+        raise HTTPException(status_code=422, detail="question cannot be empty")
+
+    try:
+        from assistant.contract_assistant import ask
+        result = ask(
+            question=body.question,
+            job_id=body.job_id,
+            conversation_history=body.conversation_history,
+        )
+        return {
+            "question":           body.question,
+            "answer":             result["answer"],
+            "sources_used":       result["sources_used"],
+            "job_ids_referenced": result["job_ids_referenced"],
+        }
+    except Exception as e:
+        log.error(f"[Assistant] /assistant/ask failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
-    
