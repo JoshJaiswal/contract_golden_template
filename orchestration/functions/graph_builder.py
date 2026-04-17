@@ -1,160 +1,221 @@
 """
-azure_clients.py
+graph_builder.py
 ─────────────────
-Centralised Azure service client factory.
+Builds and queries the contract knowledge graph in Cosmos DB (Gremlin API).
 
-All credentials come from environment variables — never hardcoded.
-Copy .env.example to .env and fill in your values.
+Called at the end of run_pipeline.py after the canonical JSON is finalised.
+Extracts named entities (parties, obligations, deliverables, etc.) from the
+canonical dict and writes them as vertices + edges to the Gremlin graph.
 
-Required env vars:
-    AZURE_CU_ENDPOINT           Content Understanding endpoint URL
-    AZURE_CU_KEY                Content Understanding API key
-    AZURE_BLOB_CONNECTION_STR   Storage account connection string
-    AZURE_OPENAI_ENDPOINT       Azure OpenAI endpoint URL
-    AZURE_OPENAI_KEY            Azure OpenAI API key
-    AZURE_OPENAI_DEPLOYMENT     GPT-4o deployment name (e.g. "gpt-4o")
-    AZURE_SPEECH_KEY            Speech Services subscription key
-    AZURE_SPEECH_REGION         Speech Services region (e.g. "uksouth")
+Graph schema
+────────────
+Vertex labels : Contract | Party | Obligation | Deliverable | Milestone | Clause
+Edge labels   : HAS_PARTY | HAS_OBLIGATION | HAS_DELIVERABLE | HAS_MILESTONE | HAS_CLAUSE
 
-    # Cosmos DB — Job Storage (SQL API)
-    AZURE_COSMOS_ENDPOINT       Cosmos DB account endpoint URL
-    AZURE_COSMOS_KEY            Cosmos DB primary key
-    COSMOS_DATABASE             Database name  (default: contract-intelligence)
-    COSMOS_CONTAINER            Container name (default: jobs)
-
-    # Cosmos DB — Knowledge Graph (Gremlin API)
-    COSMOS_GREMLIN_ENDPOINT     wss://<account>.gremlin.cosmos.azure.com:443/
-    COSMOS_GREMLIN_KEY          Cosmos DB primary key (same account is fine)
-    COSMOS_GREMLIN_DATABASE     Gremlin database name (default: contract-graph)
-    COSMOS_GREMLIN_GRAPH        Gremlin graph name    (default: entities)
+All vertex properties are stored as strings (Gremlin / Cosmos limitation).
 """
 
-import os
 import logging
-from functools import lru_cache
-
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
+from config.gremlin_client import run_gremlin_query
 
 log = logging.getLogger(__name__)
 
 
-def _require_env(key: str) -> str:
-    """Get env var or raise a clear error."""
-    val = os.getenv(key)
-    if not val:
-        raise EnvironmentError(
-            f"Missing required environment variable: {key}\n"
-            f"Add it to your .env file. See .env.example for all required vars."
-        )
-    return val
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _safe(value) -> str:
+    """Escape single quotes and truncate long strings for Gremlin queries."""
+    return str(value).replace("'", "\\'")[:250]
 
 
-# ── Content Understanding ──────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_cu_client():
-    """
-    Azure Content Understanding / Document Intelligence client.
-    pip install azure-ai-documentintelligence
-    """
-    endpoint = _require_env("AZURE_CU_ENDPOINT")
-    key      = _require_env("AZURE_CU_KEY")
-
-    from azure.ai.documentintelligence import DocumentIntelligenceClient
-    from azure.core.credentials import AzureKeyCredential
-    return DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-
-
-# ── Blob Storage ───────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_blob_client():
-    """
-    Azure Blob Storage client.
-    pip install azure-storage-blob
-    """
-    connection_str = _require_env("AZURE_BLOB_CONNECTION_STR")
-
-    from azure.storage.blob import BlobServiceClient
-    return BlobServiceClient.from_connection_string(connection_str)
-
-
-# ── Azure OpenAI ───────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_openai_client():
-    """
-    Azure OpenAI client for GPT-4o extraction.
-    pip install openai
-    """
-    endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
-    key      = _require_env("AZURE_OPENAI_KEY")
-
-    from openai import AzureOpenAI
-    return AzureOpenAI(
-        azure_endpoint=endpoint,
-        api_key=key,
-        api_version="2024-12-01-preview",
+def _props_str(properties: dict) -> str:
+    """Convert a dict to a chain of .property(...) calls for Gremlin."""
+    return "".join(
+        f".property('{_safe(k)}', '{_safe(v)}')"
+        for k, v in properties.items()
+        if v and str(v).strip()
     )
 
 
-# ── Speech Services ────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_speech_config():
+def upsert_vertex(label: str, entity_id: str, properties: dict) -> None:
     """
-    Azure Speech Services config for audio transcription.
-    pip install azure-cognitiveservices-speech
-
-    Free tier: 5 hours/month transcription.
-    Enable: Azure Portal → Create Resource → Speech.
+    Create or update a vertex.
+    Uses coalesce(unfold(), addV(...)) pattern — safe for concurrent calls.
     """
-    key    = _require_env("AZURE_SPEECH_KEY")
-    region = _require_env("AZURE_SPEECH_REGION")
+    props = _props_str(properties)
+    query = (
+        f"g.V().has('{label}', 'entityId', '{_safe(entity_id)}')"
+        f".fold()"
+        f".coalesce("
+        f"  unfold(){props},"
+        f"  addV('{label}').property('entityId', '{_safe(entity_id)}'){props}"
+        f")"
+    )
+    run_gremlin_query(query)
 
-    import azure.cognitiveservices.speech as speechsdk
-    config = speechsdk.SpeechConfig(subscription=key, region=region)
-    config.speech_recognition_language = "en-US"
-    config.output_format = speechsdk.OutputFormat.Detailed
-    return config
 
-
-def get_speech_endpoint() -> tuple[str, str]:
+def upsert_edge(from_entity_id: str, to_entity_id: str, edge_label: str, properties: dict = {}) -> None:
     """
-    Return (key, region) for use with the Speech batch REST API.
-    Separate from get_speech_config() because batch API uses raw HTTP,
-    not the SDK config object.
+    Create an edge between two vertices if it doesn't already exist.
     """
-    key    = _require_env("AZURE_SPEECH_KEY")
-    region = _require_env("AZURE_SPEECH_REGION")
-    return key, region
+    props = _props_str(properties)
+    query = (
+        f"g.V().has('entityId', '{_safe(from_entity_id)}').as('a')"
+        f".V().has('entityId', '{_safe(to_entity_id)}').as('b')"
+        f".coalesce("
+        f"  __.select('a').outE('{edge_label}').where(inV().as('b')),"
+        f"  addE('{edge_label}').from('a').to('b'){props}"
+        f")"
+    )
+    run_gremlin_query(query)
 
 
-def get_openai_deployment() -> str:
-    """Return the configured GPT-4o deployment name."""
-    return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+# ── Main builder ───────────────────────────────────────────────────────────────
 
-
-# ── Cosmos DB (SQL API) — re-exported for convenience ─────────────────────────
-# Full implementation lives in config/cosmos_client.py
-
-def get_jobs_container():
+def build_graph_from_canonical(job_id: str, canonical: dict) -> None:
     """
-    Cosmos DB container for job records.
-    Delegates to config.cosmos_client for the actual client setup.
+    Traverse the canonical contract package and write all entities to the graph.
+
+    Args:
+        job_id:    Pipeline job ID — used as the Contract vertex entityId.
+        canonical: Merged canonical dict produced by merge_engine.merge_results().
     """
-    from config.cosmos_client import get_jobs_container as _get
-    return _get()
+    log.info(f"[GraphBuilder] Building graph for job {job_id}")
+
+    # ── 1. Contract vertex ────────────────────────────────────────────────────
+    dates       = canonical.get("dates", {})
+    legal       = canonical.get("legal", {})
+    review      = canonical.get("review", {})
+
+    upsert_vertex("Contract", job_id, {
+        "jobId":          job_id,
+        "contractType":   canonical.get("_contractType", ""),
+        "effectiveDate":  dates.get("effectiveDate", ""),
+        "expirationDate": dates.get("expirationDate", ""),
+        "governingLaw":   legal.get("governingLaw", ""),
+        "reviewStatus":   review.get("status", ""),
+    })
+
+    # ── 2. Party vertices + HAS_PARTY edges ───────────────────────────────────
+    parties = canonical.get("parties", {})
+    for role in ("client", "vendor"):
+        party_info = parties.get(role)
+        if not party_info:
+            continue
+        party_name = (
+            party_info.get("name", "").strip()
+            if isinstance(party_info, dict)
+            else str(party_info).strip()
+        )
+        if not party_name:
+            continue
+
+        party_id = f"{party_name.replace(' ', '_').lower()}_{role}"
+        upsert_vertex("Party", party_id, {
+            "name": party_name,
+            "role": role,
+        })
+        upsert_edge(job_id, party_id, "HAS_PARTY", {"role": role})
+        log.debug(f"[GraphBuilder] Party: {role} → {party_name}")
+
+    # ── 3. Obligation vertices + HAS_OBLIGATION edges ─────────────────────────
+    obligations = canonical.get("obligations", [])
+    if isinstance(obligations, list):
+        for i, ob in enumerate(obligations):
+            ob_id  = f"{job_id}_ob_{i}"
+            ob_desc = ob.get("description", ob) if isinstance(ob, dict) else str(ob)
+            due     = ob.get("dueDate", "")    if isinstance(ob, dict) else ""
+            upsert_vertex("Obligation", ob_id, {
+                "description": str(ob_desc)[:250],
+                "dueDate":     str(due),
+                "index":       str(i),
+            })
+            upsert_edge(job_id, ob_id, "HAS_OBLIGATION")
+
+    # ── 4. Deliverable vertices + HAS_DELIVERABLE edges ───────────────────────
+    scope        = canonical.get("scope", {})
+    deliverables = scope.get("deliverables", [])
+    if isinstance(deliverables, list):
+        for i, d in enumerate(deliverables):
+            d_id   = f"{job_id}_del_{i}"
+            d_name = d.get("name", d) if isinstance(d, dict) else str(d)
+            d_due  = d.get("dueDate", "") if isinstance(d, dict) else ""
+            upsert_vertex("Deliverable", d_id, {
+                "name":    str(d_name)[:250],
+                "dueDate": str(d_due),
+                "index":   str(i),
+            })
+            upsert_edge(job_id, d_id, "HAS_DELIVERABLE")
+
+    # ── 5. Milestone vertices + HAS_MILESTONE edges ───────────────────────────
+    commercials = canonical.get("commercials", {})
+    milestones  = commercials.get("milestones", [])
+    if isinstance(milestones, list):
+        for i, m in enumerate(milestones):
+            m_id   = f"{job_id}_ms_{i}"
+            m_name = m.get("name", m) if isinstance(m, dict) else str(m)
+            m_date = m.get("dueDate", "") if isinstance(m, dict) else ""
+            m_val  = m.get("value", "")  if isinstance(m, dict) else ""
+            upsert_vertex("Milestone", m_id, {
+                "name":    str(m_name)[:250],
+                "dueDate": str(m_date),
+                "value":   str(m_val),
+                "index":   str(i),
+            })
+            upsert_edge(job_id, m_id, "HAS_MILESTONE")
+
+    log.info(f"[GraphBuilder] Graph build complete for job {job_id}")
 
 
-# ── Cosmos DB (Gremlin API) — re-exported for convenience ─────────────────────
-# Full implementation lives in config/gremlin_client.py
+# ── Query helpers (used by /graph/* API endpoints) ────────────────────────────
 
-def get_gremlin_client():
+def get_contract_parties(job_id: str) -> list:
+    """Return all Party vertices linked to a contract."""
+    return run_gremlin_query(
+        f"g.V().has('Contract', 'entityId', '{_safe(job_id)}')"
+        f".out('HAS_PARTY').valueMap(true)"
+    )
+
+
+def get_contract_obligations(job_id: str) -> list:
+    """Return all Obligation vertices linked to a contract."""
+    return run_gremlin_query(
+        f"g.V().has('Contract', 'entityId', '{_safe(job_id)}')"
+        f".out('HAS_OBLIGATION').valueMap(true)"
+    )
+
+
+def get_contract_deliverables(job_id: str) -> list:
+    """Return all Deliverable vertices linked to a contract."""
+    return run_gremlin_query(
+        f"g.V().has('Contract', 'entityId', '{_safe(job_id)}')"
+        f".out('HAS_DELIVERABLE').valueMap(true)"
+    )
+
+
+def get_contracts_by_party(party_name: str) -> list:
     """
-    Gremlin client for knowledge graph operations.
-    Delegates to config.gremlin_client for the actual client setup.
+    Cross-contract query: find all contracts that involve a named party.
+    Useful for 'show me all contracts with Acme Corp'.
     """
-    from config.gremlin_client import get_gremlin_client as _get
-    return _get()
+    safe_name = _safe(party_name)
+    return run_gremlin_query(
+        f"g.V().hasLabel('Party').has('name', '{safe_name}')"
+        f".in('HAS_PARTY').valueMap(true)"
+    )
+
+
+def get_full_graph(job_id: str) -> dict:
+    """
+    Return all vertices and edges for a contract as a dict.
+    Used by the frontend graph visualiser.
+    """
+    vertices = run_gremlin_query(
+        f"g.V().has('entityId', '{_safe(job_id)}')"
+        f".union(__.identity(), __.out()).valueMap(true)"
+    )
+    edges = run_gremlin_query(
+        f"g.V().has('entityId', '{_safe(job_id)}')"
+        f".outE().project('label','from','to').by(label()).by(outV().values('entityId')).by(inV().values('entityId'))"
+    )
+    return {"vertices": vertices, "edges": edges}
