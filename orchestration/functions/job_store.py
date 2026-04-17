@@ -1,160 +1,133 @@
 """
-azure_clients.py
-─────────────────
-Centralised Azure service client factory.
+job_store.py
+─────────────
+Cosmos DB-backed job persistence layer.
+Replaces the in-memory JOBS dict in api.py.
 
-All credentials come from environment variables — never hardcoded.
-Copy .env.example to .env and fill in your values.
+All reads and writes go through this module so api.py
+stays clean and the storage backend can be swapped easily.
 
-Required env vars:
-    AZURE_CU_ENDPOINT           Content Understanding endpoint URL
-    AZURE_CU_KEY                Content Understanding API key
-    AZURE_BLOB_CONNECTION_STR   Storage account connection string
-    AZURE_OPENAI_ENDPOINT       Azure OpenAI endpoint URL
-    AZURE_OPENAI_KEY            Azure OpenAI API key
-    AZURE_OPENAI_DEPLOYMENT     GPT-4o deployment name (e.g. "gpt-4o")
-    AZURE_SPEECH_KEY            Speech Services subscription key
-    AZURE_SPEECH_REGION         Speech Services region (e.g. "uksouth")
-
-    # Cosmos DB — Job Storage (SQL API)
-    AZURE_COSMOS_ENDPOINT       Cosmos DB account endpoint URL
-    AZURE_COSMOS_KEY            Cosmos DB primary key
-    COSMOS_DATABASE             Database name  (default: contract-intelligence)
-    COSMOS_CONTAINER            Container name (default: jobs)
-
-    # Cosmos DB — Knowledge Graph (Gremlin API)
-    COSMOS_GREMLIN_ENDPOINT     wss://<account>.gremlin.cosmos.azure.com:443/
-    COSMOS_GREMLIN_KEY          Cosmos DB primary key (same account is fine)
-    COSMOS_GREMLIN_DATABASE     Gremlin database name (default: contract-graph)
-    COSMOS_GREMLIN_GRAPH        Gremlin graph name    (default: entities)
+Document structure (mirrors the old in-memory dict exactly):
+    {
+        "id":            "<job_id>",        # Cosmos DB requires "id"
+        "job_id":        "<job_id>",
+        "status":        "queued | processing | complete | failed",
+        "created_at":    "<iso-datetime>",
+        "completed_at":  "<iso-datetime>",
+        "file_name":     "<original filename>",
+        "contract_type": "nda | sow | auto | both",
+        "outputs":       { "canonical": "...", "nda_pdf": "...", ... } | None,
+        "error":         "<message>" | None,
+    }
 """
 
-import os
 import logging
-from functools import lru_cache
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
 
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
+from config.cosmos_client import get_jobs_container
 
 log = logging.getLogger(__name__)
 
 
-def _require_env(key: str) -> str:
-    """Get env var or raise a clear error."""
-    val = os.getenv(key)
-    if not val:
-        raise EnvironmentError(
-            f"Missing required environment variable: {key}\n"
-            f"Add it to your .env file. See .env.example for all required vars."
-        )
-    return val
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-# ── Content Understanding ──────────────────────────────────────────────────────
+# ── Public API ─────────────────────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
-def get_cu_client():
+def create_job(job_id: str, file_name: str, contract_type: str) -> dict:
     """
-    Azure Content Understanding / Document Intelligence client.
-    pip install azure-ai-documentintelligence
+    Create and persist a new job document in Cosmos DB.
+    Returns the job dict.
     """
-    endpoint = _require_env("AZURE_CU_ENDPOINT")
-    key      = _require_env("AZURE_CU_KEY")
+    job = {
+        "id":            job_id,   # Cosmos DB primary key
+        "job_id":        job_id,
+        "status":        "queued",
+        "created_at":    _now(),
+        "completed_at":  None,
+        "file_name":     file_name,
+        "contract_type": contract_type,
+        "outputs":       None,
+        "error":         None,
+    }
+    container = get_jobs_container()
+    container.create_item(body=job)
+    log.info(f"[JobStore] Created job {job_id}")
+    return job
 
-    from azure.ai.documentintelligence import DocumentIntelligenceClient
-    from azure.core.credentials import AzureKeyCredential
-    return DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
-
-# ── Blob Storage ───────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_blob_client():
+def get_job(job_id: str) -> Optional[dict]:
     """
-    Azure Blob Storage client.
-    pip install azure-storage-blob
+    Fetch a job by ID. Returns None if not found.
     """
-    connection_str = _require_env("AZURE_BLOB_CONNECTION_STR")
+    try:
+        container = get_jobs_container()
+        return container.read_item(item=job_id, partition_key=job_id)
+    except CosmosResourceNotFoundError:
+        return None
+    except Exception as e:
+        log.error(f"[JobStore] get_job({job_id}) failed: {e}")
+        raise
 
-    from azure.storage.blob import BlobServiceClient
-    return BlobServiceClient.from_connection_string(connection_str)
 
-
-# ── Azure OpenAI ───────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_openai_client():
+def update_job(job_id: str, updates: dict) -> dict:
     """
-    Azure OpenAI client for GPT-4o extraction.
-    pip install openai
+    Patch a job document with the provided key/value updates.
+    Automatically stamps updated_at.
+    Returns the updated job dict.
     """
-    endpoint = _require_env("AZURE_OPENAI_ENDPOINT")
-    key      = _require_env("AZURE_OPENAI_KEY")
+    job = get_job(job_id)
+    if job is None:
+        raise KeyError(f"Job {job_id} not found in Cosmos DB")
 
-    from openai import AzureOpenAI
-    return AzureOpenAI(
-        azure_endpoint=endpoint,
-        api_key=key,
-        api_version="2024-12-01-preview",
+    job.update(updates)
+    job["updated_at"] = _now()
+
+    container = get_jobs_container()
+    container.replace_item(item=job_id, body=job)
+    log.debug(f"[JobStore] Updated job {job_id}: {list(updates.keys())}")
+    return job
+
+
+def delete_job(job_id: str) -> None:
+    """
+    Delete a job document from Cosmos DB.
+    """
+    try:
+        container = get_jobs_container()
+        container.delete_item(item=job_id, partition_key=job_id)
+        log.info(f"[JobStore] Deleted job {job_id}")
+    except CosmosResourceNotFoundError:
+        log.warning(f"[JobStore] delete_job({job_id}) — document not found, skipping")
+    except Exception as e:
+        log.error(f"[JobStore] delete_job({job_id}) failed: {e}")
+        raise
+
+
+def list_jobs(limit: int = 50) -> list[dict]:
+    """
+    Return up to `limit` jobs ordered by creation time (newest first).
+    """
+    container = get_jobs_container()
+    query = (
+        "SELECT c.job_id, c.status, c.file_name, c.contract_type, c.created_at "
+        "FROM c ORDER BY c.created_at DESC OFFSET 0 LIMIT @limit"
     )
+    items = list(container.query_items(
+        query=query,
+        parameters=[{"name": "@limit", "value": limit}],
+        enable_cross_partition_query=True,
+    ))
+    return items
 
 
-# ── Speech Services ────────────────────────────────────────────────────────────
-
-@lru_cache(maxsize=1)
-def get_speech_config():
-    """
-    Azure Speech Services config for audio transcription.
-    pip install azure-cognitiveservices-speech
-
-    Free tier: 5 hours/month transcription.
-    Enable: Azure Portal → Create Resource → Speech.
-    """
-    key    = _require_env("AZURE_SPEECH_KEY")
-    region = _require_env("AZURE_SPEECH_REGION")
-
-    import azure.cognitiveservices.speech as speechsdk
-    config = speechsdk.SpeechConfig(subscription=key, region=region)
-    config.speech_recognition_language = "en-US"
-    config.output_format = speechsdk.OutputFormat.Detailed
-    return config
-
-
-def get_speech_endpoint() -> tuple[str, str]:
-    """
-    Return (key, region) for use with the Speech batch REST API.
-    Separate from get_speech_config() because batch API uses raw HTTP,
-    not the SDK config object.
-    """
-    key    = _require_env("AZURE_SPEECH_KEY")
-    region = _require_env("AZURE_SPEECH_REGION")
-    return key, region
-
-
-def get_openai_deployment() -> str:
-    """Return the configured GPT-4o deployment name."""
-    return os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-
-
-# ── Cosmos DB (SQL API) — re-exported for convenience ─────────────────────────
-# Full implementation lives in config/cosmos_client.py
-
-def get_jobs_container():
-    """
-    Cosmos DB container for job records.
-    Delegates to config.cosmos_client for the actual client setup.
-    """
-    from config.cosmos_client import get_jobs_container as _get
-    return _get()
-
-
-# ── Cosmos DB (Gremlin API) — re-exported for convenience ─────────────────────
-# Full implementation lives in config/gremlin_client.py
-
-def get_gremlin_client():
-    """
-    Gremlin client for knowledge graph operations.
-    Delegates to config.gremlin_client for the actual client setup.
-    """
-    from config.gremlin_client import get_gremlin_client as _get
-    return _get()
+def job_exists(job_id: str) -> bool:
+    """Quick existence check without raising."""
+    return get_job(job_id) is not None
