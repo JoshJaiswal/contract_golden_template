@@ -1,0 +1,1 @@
+from assistant.contract_assistant import ask, ContractConversation
