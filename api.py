@@ -13,11 +13,22 @@ Usage (local):
 Then open: http://localhost:8000/docs  (interactive API docs)
 
 Endpoints:
-    POST /analyze          — upload file, get job_id back
-    GET  /jobs/{job_id}    — check status, get download URLs when ready
-    GET  /download/{job_id}/nda  — download NDA PDF
-    GET  /download/{job_id}/sow  — download SOW PDF
-    GET  /health           — health check
+    POST /analyze                   — upload file, get job_id back
+    GET  /jobs/{job_id}             — check status, get download URLs when ready
+    GET  /jobs                      — list all jobs
+    DELETE /jobs/{job_id}           — delete a job and its files
+    POST /jobs/{job_id}/regenerate  — re-run PDF generation with overrides
+    GET  /download/{job_id}/nda     — download NDA PDF
+    GET  /download/{job_id}/sow     — download SOW PDF
+    GET  /download/{job_id}/canonical — download canonical JSON
+    GET  /download/{job_id}/source  — download original uploaded file
+    GET  /graph/{job_id}/parties    — graph: parties linked to a contract
+    GET  /graph/{job_id}/obligations — graph: obligations linked to a contract
+    GET  /graph/{job_id}/deliverables — graph: deliverables linked to a contract
+    GET  /graph/party/{party_name}  — graph: all contracts involving a party
+    GET  /graph/{job_id}/full       — graph: all vertices + edges for a contract
+    POST /graph/query               — graph: run a raw Gremlin query (power users)
+    GET  /health                    — health check
 """
 
 import logging
@@ -26,7 +37,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import List, Literal
 
 import uvicorn
 from dotenv import load_dotenv
@@ -34,51 +45,11 @@ from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile, Re
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security.api_key import APIKeyHeader
+from pydantic import BaseModel
 from slowapi import Limiter
-# from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
-
-# ── Cosmos DB job helpers ─────────────────────────────────────────────────────
-from config.azure_clients import get_cosmos_container
-
-
-def _job_get(job_id: str) -> dict | None:
-    """Fetch a single job document from Cosmos DB."""
-    try:
-        container = get_cosmos_container()
-        item = container.read_item(item=job_id, partition_key=job_id)
-        return dict(item)
-    except Exception:
-        return None
-
-
-def _job_upsert(job: dict) -> None:
-    """Insert or update a job document in Cosmos DB."""
-    container = get_cosmos_container()
-    # Cosmos requires an 'id' field — map job_id to id
-    doc = {**job, "id": job["job_id"]}
-    container.upsert_item(doc)
-
-
-def _job_list() -> list[dict]:
-    """Return all jobs ordered by created_at descending."""
-    container = get_cosmos_container()
-    query = "SELECT * FROM c ORDER BY c.created_at DESC"
-    items = list(container.query_items(
-        query=query,
-        enable_cross_partition_query=True
-    ))
-    return items
-
-
-def _job_delete(job_id: str) -> None:
-    """Delete a job document from Cosmos DB."""
-    container = get_cosmos_container()
-    container.delete_item(item=job_id, partition_key=job_id)
-
-
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -92,13 +63,15 @@ app = FastAPI(
     title="Contract Intelligence Platform",
     description=(
         "Transforms unstructured contract documents into standardised "
-        "NDA and SOW PDFs using Azure Content Understanding."
+        "NDA and SOW PDFs using Azure Content Understanding, "
+        "with Cosmos DB job persistence and a knowledge graph."
     ),
-    version="1.0.0",
+    version="2.0.0",
 )
 
 def get_api_key_for_limit(request: Request):
     return request.headers.get("X-API-Key") or request.client.host
+
 limiter = Limiter(key_func=get_api_key_for_limit)
 app.state.limiter = limiter
 
@@ -111,11 +84,12 @@ app.add_middleware(
 )
 
 @app.exception_handler(RateLimitExceeded)
-def rate_limit_handler(request,exc):
+def rate_limit_handler(request, exc):
     return JSONResponse(
         status_code=429,
         content={"detail": "Rate limit exceeded"},
     )
+
 # ── API Key auth ──────────────────────────────────────────────────────────────
 API_KEY        = os.getenv("CONTRACT_API_KEY", "GoldenEY1479")
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -127,10 +101,7 @@ def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     return api_key
 
 
-# ── Job storage (in-memory for local, swap for Redis/DB in production) ────────
-# Structure: { job_id: { status, created_at, file_name, error, outputs } }
-
-# Directories
+# ── Directories ───────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path("api_uploads")
 OUTPUT_DIR = Path("api_outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -151,21 +122,17 @@ SUPPORTED_TYPES = {
 
 # ── Background pipeline runner ────────────────────────────────────────────────
 async def run_pipeline_job(job_id: str, file_path: str, contract_type: str):
-    """Run the full pipeline in the background and persist status to Cosmos DB."""
+    """
+    Run the full pipeline in the background.
+    Updates the Cosmos DB job document with status and output paths.
+    """
     import asyncio
+    from orchestration.functions.job_store import update_job
 
-    job = _job_get(job_id)
-    if not job:
-        # If the job doc is missing, nothing we can do safely.
-        log.error(f"[Job {job_id}] Missing job document in Cosmos — aborting")
-        return
-
-    job["status"] = "processing"
-    _job_upsert(job)
+    update_job(job_id, {"status": "processing"})
     log.info(f"[Job {job_id}] Pipeline starting — file={Path(file_path).name}")
 
     try:
-        # Run pipeline in thread pool so it doesn't block the event loop
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
@@ -174,25 +141,21 @@ async def run_pipeline_job(job_id: str, file_path: str, contract_type: str):
             file_path,
             contract_type,
         )
-
-        job = _job_get(job_id) or job
-        job.update({
+        update_job(job_id, {
             "status":       "complete",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "outputs":      result,
         })
-        _job_upsert(job)
         log.info(f"[Job {job_id}] Complete")
 
     except Exception as e:
         log.error(f"[Job {job_id}] Failed: {e}", exc_info=True)
-        job = _job_get(job_id) or job
-        job.update({
+        update_job(job_id, {
             "status":       "failed",
             "error":        str(e),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
-        _job_upsert(job)
+
 
 def _run_pipeline_sync(job_id: str, file_path: str, contract_type: str) -> dict:
     """
@@ -210,10 +173,11 @@ def _run_pipeline_sync(job_id: str, file_path: str, contract_type: str) -> dict:
     job_output_dir = OUTPUT_DIR / job_id
     job_output_dir.mkdir(exist_ok=True)
 
-    # Step 1 — Run extraction pipeline
+    # Step 1 — Run extraction pipeline (also builds the knowledge graph internally)
     canonical = run_pipeline(
         input_path=file_path,
         contract_type=contract_type,
+        job_id=job_id,
         upload_to_blob=True,
     )
 
@@ -238,9 +202,9 @@ def _run_pipeline_sync(job_id: str, file_path: str, contract_type: str) -> dict:
         generate_sow = True
 
     else:  # "auto"
-        parties        = canonical.get("parties", {})
-        scope          = canonical.get("scope", {})
-        commercials    = canonical.get("commercials", {})
+        parties         = canonical.get("parties", {})
+        scope           = canonical.get("scope", {})
+        commercials     = canonical.get("commercials", {})
         confidentiality = canonical.get("confidentiality", {})
 
         nda_type = str(parties.get("ndaType", "")).lower()
@@ -283,6 +247,7 @@ def _run_pipeline_sync(job_id: str, file_path: str, contract_type: str) -> dict:
 
     return outputs
 
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["System"])
@@ -290,16 +255,17 @@ def health():
     """Check API is running."""
     return {
         "status":  "ok",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "time":    datetime.now(timezone.utc).isoformat(),
     }
+
 
 @limiter.limit("5/minute")
 @app.post("/analyze", tags=["Pipeline"])
 async def analyze(
-    request: Request,
+    request:       Request,
     file:          UploadFile = File(..., description="Contract document to process"),
-    contract_type: str        = Form("auto", description="nda | sow | auto"),
+    contract_type: str        = Form("auto", description="nda | sow | auto | both"),
     _key:          str        = Security(verify_api_key),
 ):
     """
@@ -310,22 +276,22 @@ async def analyze(
 
     Supported formats: PDF, DOCX, EML, MP3, WAV, M4A
     """
+    from orchestration.functions.job_store import create_job
+
     # Validate file type
     file_ext = Path(file.filename or "").suffix.lower()
-
     allowed_extensions = {".pdf", ".docx", ".doc", ".eml", ".mp3", ".wav", ".m4a"}
     if file_ext not in allowed_extensions:
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type: {file_ext}. "
-                   f"Allowed: {sorted(allowed_extensions)}"
+            detail=f"Unsupported file type: {file_ext}. Allowed: {sorted(allowed_extensions)}"
         )
 
     # Validate contract_type
     if contract_type not in ("nda", "sow", "auto", "both"):
         raise HTTPException(
             status_code=422,
-            detail="contract_type must be 'nda', 'sow', or 'auto'"
+            detail="contract_type must be 'nda', 'sow', 'both', or 'auto'"
         )
 
     # Save uploaded file
@@ -341,17 +307,12 @@ async def analyze(
         f"name={file.filename}, size={file_path.stat().st_size} bytes"
     )
 
-    # Register job in Cosmos DB
-    job = {
-        "job_id":        job_id,
-        "status":        "queued",
-        "created_at":    datetime.now(timezone.utc).isoformat(),
-        "file_name":     file.filename,
-        "contract_type": contract_type,
-        "error":         None,
-        "outputs":       {},
-    }
-    _job_upsert(job)
+    # Persist job to Cosmos DB
+    create_job(
+        job_id=job_id,
+        file_name=file.filename,
+        contract_type=contract_type,
+    )
 
     # Start pipeline in background
     import asyncio
@@ -360,10 +321,10 @@ async def analyze(
     )
 
     return {
-        "job_id":      job_id,
-        "status":      "queued",
-        "message":     "Pipeline started. Poll /jobs/{job_id} for status.",
-        "poll_url":    f"/jobs/{job_id}",
+        "job_id":   job_id,
+        "status":   "queued",
+        "message":  "Pipeline started. Poll /jobs/{job_id} for status.",
+        "poll_url": f"/jobs/{job_id}",
     }
 
 
@@ -381,21 +342,67 @@ def get_job(
     - complete    — finished, download URLs available
     - failed      — error occurred, see 'error' field
     """
-    job = _job_get(job_id)
+    from orchestration.functions.job_store import get_job as _get_job
+
+    job = _get_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    job = dict(job)  # make a copy — don't mutate the Cosmos document
 
     # Add download URLs if complete
-    if job.get("status") == "complete":
-        base = f"/download/{job_id}"
+    if job["status"] == "complete":
+        base    = f"/download/{job_id}"
         outputs = job.get("outputs") or {}
         job["download_urls"] = {
-            k: f"{base}/{k.replace('_pdf','')}"
+            k: f"{base}/{k.replace('_pdf', '')}"
             for k in outputs
+            if k.endswith("_pdf")
         }
 
     return job
 
+
+@app.get("/jobs", tags=["System"])
+def list_jobs(_key: str = Security(verify_api_key)):
+    """List the 50 most recent jobs and their current status."""
+    from orchestration.functions.job_store import list_jobs as _list_jobs
+
+    jobs = _list_jobs(limit=50)
+    return {
+        "total": len(jobs),
+        "jobs":  jobs,
+    }
+
+
+@app.delete("/jobs/{job_id}", tags=["System"])
+def delete_job(
+    job_id: str,
+    _key:   str = Security(verify_api_key),
+):
+    """Delete a job and its associated files from disk and Cosmos DB."""
+    from orchestration.functions.job_store import get_job as _get_job, delete_job as _delete_job
+
+    if not _get_job(job_id):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Clean up output files
+    job_output_dir = OUTPUT_DIR / job_id
+    if job_output_dir.exists():
+        shutil.rmtree(job_output_dir)
+
+    # Clean up uploaded file
+    upload_file = next(UPLOAD_DIR.glob(f"{job_id}.*"), None)
+    if upload_file:
+        upload_file.unlink(missing_ok=True)
+
+    # Delete from Cosmos DB
+    _delete_job(job_id)
+
+    return {"message": f"Job {job_id} deleted"}
+
+
+# ── Downloads ─────────────────────────────────────────────────────────────────
 
 @app.get("/download/{job_id}/nda", tags=["Downloads"])
 def download_nda(
@@ -409,11 +416,7 @@ def download_nda(
         raise HTTPException(status_code=404, detail="NDA PDF not found")
 
     filename = _safe_filename(job_id, "nda")
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename=filename,
-    )
+    return FileResponse(path=str(pdf_path), media_type="application/pdf", filename=filename)
 
 
 @app.get("/download/{job_id}/sow", tags=["Downloads"])
@@ -428,91 +431,28 @@ def download_sow(
         raise HTTPException(status_code=404, detail="SOW PDF not found")
 
     filename = _safe_filename(job_id, "sow")
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename=filename,
-    )
-
-
-@app.get("/jobs", tags=["System"])
-def list_jobs(_key: str = Security(verify_api_key)):
-    """List all jobs and their current status."""
-    jobs = _job_list()
-    return {"total": len(jobs), "jobs": jobs}
-
-
-@app.delete("/jobs/{job_id}", tags=["System"])
-def delete_job(
-    job_id: str,
-    _key:   str = Security(verify_api_key),
-):
-    """Delete a job and its associated files."""
-    job = _job_get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    # Clean up files
-    job_output_dir = OUTPUT_DIR / job_id
-    if job_output_dir.exists():
-        shutil.rmtree(job_output_dir)
-
-    upload_file = next(UPLOAD_DIR.glob(f"{job_id}.*"), None)
-    if upload_file:
-        upload_file.unlink(missing_ok=True)
-
-    # Delete job document from Cosmos
-    _job_delete(job_id)
-    return {"message": f"Job {job_id} deleted"}
-
-
-# ── Helpers# ── Helpers ───────────────────────────────────────────────────────────────────
-def _validate_download(job_id: str) -> dict:
-    """Return job if downloadable; otherwise raise appropriate HTTPException."""
-    job = _job_get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    status = job.get("status")
-    if status == "processing":
-        raise HTTPException(status_code=202, detail="Job still processing")
-    if status == "failed":
-        raise HTTPException(
-            status_code=500,
-            detail=f"Job failed: {job.get('error', 'unknown error')}"
-        )
-    if status != "complete":
-        raise HTTPException(status_code=400, detail=f"Job status: {status}")
-
-    return job
-
-
-def _safe_filename(job_id: str, doc_type: str) -> str:
-    """Generate a clean download filename from job metadata."""
-    job = _job_get(job_id) or {}
-    original = Path(job.get("file_name", "contract")).stem
-
-    # Sanitise
-    safe = "".join(c for c in original if c.isalnum() or c in "-_ ")
-    safe = safe.strip()[:40] or "contract"
-    return f"{safe}-{doc_type}.pdf"
+    return FileResponse(path=str(pdf_path), media_type="application/pdf", filename=filename)
 
 
 @app.get("/download/{job_id}/canonical", tags=["Downloads"])
 def download_canonical(job_id: str, _key: str = Security(verify_api_key)):
+    """Download the canonical JSON for a completed job."""
     canonical_path = OUTPUT_DIR / job_id / "canonical.json"
     if not canonical_path.exists():
         raise HTTPException(status_code=404, detail="Canonical JSON not found")
     return FileResponse(
         canonical_path,
         media_type="application/json",
-        filename=f"{job_id}-canonical.json"
+        filename=f"{job_id}-canonical.json",
     )
+
 
 @app.get("/download/{job_id}/source", tags=["Downloads"])
 def download_source(job_id: str, _key: str = Security(verify_api_key)):
     """Return the original uploaded file so the frontend can preview it."""
-    job = _job_get(job_id)
+    from orchestration.functions.job_store import get_job as _get_job
+
+    job = _get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
@@ -533,60 +473,41 @@ def download_source(job_id: str, _key: str = Security(verify_api_key)):
         ".m4a":  "audio/mp4",
         ".txt":  "text/plain",
     }
-    media_type = mime_map.get(ext, "application/octet-stream")
+    media_type   = mime_map.get(ext, "application/octet-stream")
     original_name = job.get("file_name", f"source{ext}")
 
-    return FileResponse(
-        path=str(source_path),
-        media_type=media_type,
-        filename=original_name,
-    )
+    return FileResponse(path=str(source_path), media_type=media_type, filename=original_name)
+
 
 # ── Regenerate ────────────────────────────────────────────────────────────────
 
-from pydantic import BaseModel
-from typing import List
-
-
 class RegenerateRequest(BaseModel):
     overrides: dict
-    # Keys are field names (e.g. "confidentiality.term"), values are replacement strings.
     dismissed_fields: List[str] = []
-    # Fields the user accepted as-is — these are REMOVED from canonical.conflicts
-    # so they no longer appear as conflicts after regeneration.
 
 
 @app.post("/jobs/{job_id}/regenerate", tags=["Pipeline"])
 async def regenerate_job(
     job_id: str,
-    body: RegenerateRequest,
-    _key: str = Security(verify_api_key),
+    body:   RegenerateRequest,
+    _key:   str = Security(verify_api_key),
 ):
     """
     Patch the saved canonical JSON with user-supplied overrides, remove
     dismissed conflicts, and re-run ONLY the PDF generation step.
 
     No Azure calls are made — extraction is skipped entirely.
-
-    POST body:
-        {
-          "overrides": { "field_name": "corrected_value" },
-          "dismissed_fields": ["field_name_1", "field_name_2"]
-        }
-
-    - overrides        — fields where the user picked an alternative or custom value
-    - dismissed_fields — fields where the user accepted the chosen value as correct;
-                         these are stripped from canonical.conflicts so they won't
-                         reappear as conflicts on the next load
     """
-    job = _job_get(job_id)
+    from orchestration.functions.job_store import get_job as _get_job, update_job
+
+    job = _get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    if job.get("status") != "complete":
+    if job["status"] != "complete":
         raise HTTPException(
             status_code=400,
-            detail=f"Job must be 'complete' to regenerate. Current status: {job.get('status')}",
+            detail=f"Job must be 'complete' to regenerate. Current status: {job['status']}",
         )
 
     canonical_path = OUTPUT_DIR / job_id / "canonical.json"
@@ -597,9 +518,7 @@ async def regenerate_job(
         )
 
     # Re-queue the same job_id so frontend poll works as-is
-    job["status"] = "queued"
-    job["error"]  = None
-    _job_upsert(job)
+    update_job(job_id, {"status": "queued", "error": None})
 
     import asyncio
     asyncio.create_task(
@@ -635,15 +554,9 @@ async def _run_regenerate_job(
 ):
     """Background task: patch canonical → remove dismissed conflicts → regenerate PDFs."""
     import asyncio
+    from orchestration.functions.job_store import update_job
 
-    job = _job_get(job_id)
-    if not job:
-        log.error(f"[Job {job_id}] Missing job document in Cosmos — aborting regeneration")
-        return
-
-    job["status"] = "processing"
-    _job_upsert(job)
-
+    update_job(job_id, {"status": "processing"})
     log.info(
         f"[Job {job_id}] Regenerating — "
         f"overrides: {list(overrides.keys())} | dismissed: {dismissed_fields}"
@@ -659,29 +572,23 @@ async def _run_regenerate_job(
             dismissed_fields,
             contract_type,
         )
-
-        job = _job_get(job_id) or job
-        job.update({
+        update_job(job_id, {
             "status":       "complete",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "outputs":      result,
         })
-        _job_upsert(job)
         log.info(f"[Job {job_id}] Regeneration complete")
-
     except Exception as e:
         log.error(f"[Job {job_id}] Regeneration failed: {e}", exc_info=True)
-        job = _job_get(job_id) or job
-        job.update({
+        update_job(job_id, {
             "status":       "failed",
             "error":        str(e),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
-        _job_upsert(job)
 
 
 def _set_nested(d: dict, dot_path: str, value):
-    """Set a value in a nested dict using dot notation. e.g. 'parties.client.name'"""
+    """Set a value in a nested dict using dot notation."""
     keys = dot_path.split(".")
     for key in keys[:-1]:
         d = d.setdefault(key, {})
@@ -699,7 +606,7 @@ def _regenerate_sync(
     1. Load saved canonical.json
     2. Remove dismissed conflicts from canonical["conflicts"]
     3. Apply field overrides (dot-notation)
-    4. Save updated canonical.json
+    4. Save updated canonical.
     5. Regenerate PDFs
     """
     import sys, json
@@ -711,15 +618,13 @@ def _regenerate_sync(
 
     job_output_dir = OUTPUT_DIR / job_id
 
-    # ── Step 1: Load canonical ────────────────────────────────────────────────
+    # Step 1: Load canonical
     with open(canonical_path, "r") as f:
         canonical = json.load(f)
 
-    # ── Step 2: Remove dismissed conflicts ───────────────────────────────────
-    # The user accepted these fields as correct — strip them from the conflicts
-    # array so they don't reappear as unresolved conflicts on the next load.
+    # Step 2: Remove dismissed conflicts
     if dismissed_fields:
-        dismissed_set = set(dismissed_fields)
+        dismissed_set      = set(dismissed_fields)
         original_conflicts = canonical.get("conflicts", [])
         canonical["conflicts"] = [
             c for c in original_conflicts
@@ -728,9 +633,7 @@ def _regenerate_sync(
         removed = len(original_conflicts) - len(canonical["conflicts"])
         log.info(f"[Job {job_id}] Removed {removed} dismissed conflict(s) from canonical")
 
-    # ── Step 3: Apply field overrides ────────────────────────────────────────
-    # Also remove overridden fields from conflicts — if the user picked an
-    # alternative value, that conflict is resolved too.
+    # Step 3: Apply field overrides
     if overrides:
         overridden_fields = set(overrides.keys())
         canonical["conflicts"] = [
@@ -744,10 +647,7 @@ def _regenerate_sync(
             except Exception as e:
                 log.warning(f"[Job {job_id}] Could not apply override '{dot_path}': {e}")
 
-    # ── Step 3b: Remove filled fields from missingFields ────────────────────
-    # When overrides contain a key that matches a missing field, that field is
-    # no longer missing — remove it from both "missingFields" and "missing_fields"
-    # (the canonical uses both keys depending on the extraction version).
+    # Step 3b: Remove filled fields from missingFields
     if overrides:
         filled_keys = set(overrides.keys())
         for mf_key in ("missingFields", "missing_fields"):
@@ -757,10 +657,7 @@ def _regenerate_sync(
             if isinstance(existing, list):
                 cleaned = []
                 for entry in existing:
-                    # entry may be a plain string or a dict with a "field" key
                     if isinstance(entry, str):
-                        # Match against the last segment of the dot-path too
-                        # e.g. override key "dates.effectiveDate" should clear "effectiveDate"
                         if not any(
                             entry == k or entry == k.split(".")[-1] or k.endswith("." + entry)
                             for k in filled_keys
@@ -780,22 +677,21 @@ def _regenerate_sync(
                     canonical[mf_key] = cleaned
                     log.info(f"[Job {job_id}] Removed {removed_mf} filled field(s) from {mf_key}")
 
-    # ── Step 4: Save updated canonical ───────────────────────────────────────
+    # Step 4: Save updated canonical
     with open(canonical_path, "w") as f:
         json.dump(canonical, f, indent=2)
     log.info(f"[Job {job_id}] canonical.json updated and saved")
 
-    # ── Step 5: Regenerate PDFs ───────────────────────────────────────────────
+    # Step 5: Regenerate PDFs
     outputs = {"canonical": canonical_path}
 
-    # Determine which docs to regenerate based on contract_type
     if contract_type == "both":
         generate_nda, generate_sow = True, True
     elif contract_type == "nda":
         generate_nda, generate_sow = True, False
     elif contract_type == "sow":
         generate_nda, generate_sow = False, True
-    else:  # auto — use same heuristics as original pipeline
+    else:  # auto
         parties         = canonical.get("parties", {})
         scope           = canonical.get("scope", {})
         commercials     = canonical.get("commercials", {})
@@ -833,5 +729,120 @@ def _regenerate_sync(
     return outputs
 
 
+# ── Knowledge Graph Endpoints ─────────────────────────────────────────────────
+
+class GremlinQueryRequest(BaseModel):
+    query: str
+
+
+@app.get("/graph/{job_id}/parties", tags=["Knowledge Graph"])
+def graph_parties(job_id: str, _key: str = Security(verify_api_key)):
+    """Return all Party vertices linked to a contract."""
+    from orchestration.functions.graph_builder import get_contract_parties
+    try:
+        result = get_contract_parties(job_id)
+        return {"job_id": job_id, "parties": result}
+    except Exception as e:
+        log.error(f"[Graph] get_contract_parties({job_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/{job_id}/obligations", tags=["Knowledge Graph"])
+def graph_obligations(job_id: str, _key: str = Security(verify_api_key)):
+    """Return all Obligation vertices linked to a contract."""
+    from orchestration.functions.graph_builder import get_contract_obligations
+    try:
+        result = get_contract_obligations(job_id)
+        return {"job_id": job_id, "obligations": result}
+    except Exception as e:
+        log.error(f"[Graph] get_contract_obligations({job_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/{job_id}/deliverables", tags=["Knowledge Graph"])
+def graph_deliverables(job_id: str, _key: str = Security(verify_api_key)):
+    """Return all Deliverable vertices linked to a contract."""
+    from orchestration.functions.graph_builder import get_contract_deliverables
+    try:
+        result = get_contract_deliverables(job_id)
+        return {"job_id": job_id, "deliverables": result}
+    except Exception as e:
+        log.error(f"[Graph] get_contract_deliverables({job_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/party/{party_name}", tags=["Knowledge Graph"])
+def graph_contracts_by_party(party_name: str, _key: str = Security(verify_api_key)):
+    """Find all contracts that involve a named party (cross-contract query)."""
+    from orchestration.functions.graph_builder import get_contracts_by_party
+    try:
+        result = get_contracts_by_party(party_name)
+        return {"party_name": party_name, "contracts": result}
+    except Exception as e:
+        log.error(f"[Graph] get_contracts_by_party({party_name}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/{job_id}/full", tags=["Knowledge Graph"])
+def graph_full(job_id: str, _key: str = Security(verify_api_key)):
+    """Return the full graph (vertices + edges) for a contract. Used by the frontend visualiser."""
+    from orchestration.functions.graph_builder import get_full_graph
+    try:
+        result = get_full_graph(job_id)
+        return {"job_id": job_id, **result}
+    except Exception as e:
+        log.error(f"[Graph] get_full_graph({job_id}) failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/graph/query", tags=["Knowledge Graph"])
+def graph_raw_query(body: GremlinQueryRequest, _key: str = Security(verify_api_key)):
+    """
+    Execute a raw Gremlin query against the knowledge graph.
+    For power users and debugging. Example:
+        { "query": "g.V().hasLabel('Party').valueMap(true)" }
+    """
+    from config.gremlin_client import run_gremlin_query
+    try:
+        result = run_gremlin_query(body.query)
+        return {"result": result}
+    except Exception as e:
+        log.error(f"[Graph] raw query failed: {e}\nQuery: {body.query}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _validate_download(job_id: str):
+    from orchestration.functions.job_store import get_job as _get_job
+
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if job["status"] == "processing":
+        raise HTTPException(status_code=202, detail="Job still processing")
+    if job["status"] == "failed":
+        raise HTTPException(
+            status_code=500,
+            detail=f"Job failed: {job.get('error', 'unknown error')}"
+        )
+    if job["status"] != "complete":
+        raise HTTPException(status_code=400, detail=f"Job status: {job['status']}")
+
+
+def _safe_filename(job_id: str, doc_type: str) -> str:
+    """Generate a clean download filename from job metadata."""
+    from orchestration.functions.job_store import get_job as _get_job
+
+    job      = _get_job(job_id) or {}
+    original = Path(job.get("file_name", "contract")).stem
+    safe     = "".join(c for c in original if c.isalnum() or c in "-_ ")
+    safe     = safe.strip()[:40] or "contract"
+    return f"{safe}-{doc_type}.pdf"
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    
